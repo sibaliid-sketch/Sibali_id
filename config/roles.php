@@ -260,4 +260,100 @@ return [
         'senior_staff' => ['Executive'], // Cannot be assigned to Executive
         'basic_staff' => ['Executive'],   // Cannot be assigned to Executive
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Redirect Mappings
+    |--------------------------------------------------------------------------
+    |
+    | URL redirects after login based on user type.
+    |
+    */
+    'redirect_map' => [
+        'student' => '/student/dashboard',
+        'parent' => '/parent/dashboard',
+        'teacher' => '/teacher/dashboard',
+        'admin' => '/admin/dashboard',
+        'staff' => '/staff/dashboard',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Department Redirects
+    |--------------------------------------------------------------------------
+    |
+    | Department-specific dashboard redirects.
+    |
+    */
+    'department_redirects' => [
+        'it' => '/admin/dashboard',
+        'sales' => '/sales/dashboard',
+        'marketing' => '/marketing/dashboard',
+        'hr' => '/hr/dashboard',
+        'finance' => '/finance/dashboard',
+        'academic' => '/academic/dashboard',
+        'operations' => '/operations/dashboard',
+        'engagement' => '/engagement/dashboard',
+        'public_relation' => '/pr/dashboard',
+        'product_research' => '/product/dashboard',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Staff Level Redirects
+    |--------------------------------------------------------------------------
+    |
+    | Redirects based on staff level (1-7).
+    |
+    */
+    'staff_level_redirects' => [
+        1 => '/staff/basic/dashboard', // Basic Staff
+        2 => '/staff/senior/dashboard', // Senior Staff
+        3 => '/staff/leader/dashboard', // Leader
+        4 => '/staff/supervisor/dashboard', // Supervisor
+        5 => '/staff/manager/dashboard', // Manager
+        6 => '/staff/header/dashboard', // Header
+        7 => '/executives/dashboard', // Executives
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Allowed Routes per User Type
+    |--------------------------------------------------------------------------
+    |
+    | Routes that each user type is allowed to access for intended redirects.
+    |
+    */
+    'allowed_routes' => [
+        'student' => [
+            'student.dashboard',
+            'student.profile',
+            'student.courses',
+            'student.grades',
+            'logout',
+        ],
+        'parent' => [
+            'parent.dashboard',
+            'parent.children',
+            'parent.payments',
+            'parent.messages',
+            'logout',
+        ],
+        'teacher' => [
+            'teacher.dashboard',
+            'teacher.classes',
+            'teacher.students',
+            'teacher.grades',
+            'logout',
+        ],
+        'admin' => [
+            'admin.*', // All admin routes
+        ],
+        'staff' => [
+            'staff.dashboard',
+            'staff.tasks',
+            'staff.attendance',
+            'logout',
+        ],
+    ],
 ];

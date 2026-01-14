@@ -1,132 +1,104 @@
 #!/bin/bash
 
 # Incremental Backup Script for Sibali.id
-# Jobs incremental untuk efisiensi storage dan menurunkan RTO pada restore
-# Mengurangi storage & network usage; memungkinkan point-in-time recovery lebih granular
+# Purpose: Jobs incremental untuk efisiensi storage dan menurunkan RTO pada restore
+# Function: Mengurangi storage & network usage; memungkinkan point-in-time recovery lebih granular
 
-set -euo pipefail
+set -e
 
 # Configuration
 BACKUP_ROOT="/var/backups/sibali"
-DB_HOST="${DB_HOST:-127.0.0.1}"
+DB_HOST="${DB_HOST:-localhost}"
 DB_USER="${DB_USER:-backup_user}"
 DB_PASS="${DB_PASS:-}"
-DB_NAME="${DB_NAME:-sibaliid}"
-FILE_ROOT="/var/www/sibali.id"
-LOG_FILE="/var/log/sibali-backup.log"
+DB_NAME="${DB_NAME:-u486134328_sibaliid}"
+MYSQL_DATA_DIR="${MYSQL_DATA_DIR:-/var/lib/mysql}"
+RSYNC_SOURCE="${RSYNC_SOURCE:-/var/www/html/storage/app}"
+RSYNC_DEST_BASE="${BACKUP_ROOT}/files"
+LOG_FILE="${BACKUP_ROOT}/logs/incremental_backup.log"
 
-# Modes: DB incremental via WAL shipping / binlog capture; file deltas via rsync --link-dest or snapshot diffs
-MODE="${1:-full}"  # full, db, files
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-BACKUP_DIR="${BACKUP_ROOT}/${TIMESTAMP}"
+# Ensure log directory exists
+mkdir -p "$(dirname "$LOG_FILE")"
 
 # Logging function
 log() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $*" | tee -a "$LOG_FILE"
 }
 
-# Ensure base full-backup exists; maintain sequence numbers and manifest for applying increments in order
-check_base_backup() {
-    if [[ "$MODE" == "db" || "$MODE" == "files" ]]; then
-        if [[ ! -f "${BACKUP_ROOT}/base_full/manifest.txt" ]]; then
-            log "ERROR: Base full backup not found. Run full backup first."
-            exit 1
-        fi
+# Check if base backup exists
+if [ ! -d "${BACKUP_ROOT}/base" ]; then
+    log "ERROR: Base backup not found at ${BACKUP_ROOT}/base. Please run full backup first."
+    exit 1
+fi
+
+# Create incremental backup directory
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+INCREMENTAL_DIR="${BACKUP_ROOT}/incremental_${TIMESTAMP}"
+mkdir -p "$INCREMENTAL_DIR"
+
+log "Starting incremental backup: $INCREMENTAL_DIR"
+
+# Database incremental backup via binlog
+log "Copying MySQL binlogs..."
+if [ -d "$MYSQL_DATA_DIR" ]; then
+    # Get current binlog position
+    BINLOG_INFO=$(mysql -h"$DB_HOST" -u"$DB_USER" -p"$DB_PASS" -e "SHOW MASTER STATUS\G" 2>/dev/null | grep -E "(File|Position)" | sed 's/.*: //')
+    BINLOG_FILE=$(echo "$BINLOG_INFO" | head -1)
+    BINLOG_POS=$(echo "$BINLOG_INFO" | tail -1)
+
+    # Copy binlogs since last backup
+    # This is a simplified version - in production, track last binlog position
+    cp -r "$MYSQL_DATA_DIR"/*.index "$INCREMENTAL_DIR/" 2>/dev/null || true
+    find "$MYSQL_DATA_DIR" -name "mysql-bin.*" -newer "${BACKUP_ROOT}/base/timestamp" -exec cp {} "$INCREMENTAL_DIR/" \; 2>/dev/null || true
+
+    echo "Last Binlog: $BINLOG_FILE Position: $BINLOG_POS" > "$INCREMENTAL_DIR/binlog_position.txt"
+else
+    log "WARNING: MySQL data directory not found, skipping binlog backup"
+fi
+
+# File incremental backup using rsync
+log "Performing incremental file backup..."
+mkdir -p "$INCREMENTAL_DIR/files"
+
+if rsync -a --link-dest="${BACKUP_ROOT}/base/files" --exclude='*.tmp' --exclude='cache/' "$RSYNC_SOURCE/" "$INCREMENTAL_DIR/files/"; then
+    log "File backup completed successfully"
+else
+    log "ERROR: File backup failed"
+    exit 1
+fi
+
+# Create manifest
+cat > "$INCREMENTAL_DIR/manifest.txt" << EOF
+Backup Type: Incremental
+Timestamp: $TIMESTAMP
+Base Backup: ${BACKUP_ROOT}/base
+Source Directories:
+  - Database: $MYSQL_DATA_DIR
+  - Files: $RSYNC_SOURCE
+Binlog Position: $BINLOG_FILE $BINLOG_POS
+Created: $(date)
+EOF
+
+# Verify backup integrity
+log "Verifying backup integrity..."
+if [ -f "$INCREMENTAL_DIR/manifest.txt" ] && [ -d "$INCREMENTAL_DIR/files" ]; then
+    # Check for missing segments (simplified)
+    if [ -f "$INCREMENTAL_DIR/binlog_position.txt" ]; then
+        log "Backup verification passed"
+    else
+        log "WARNING: Binlog position not captured"
     fi
-}
+else
+    log "ERROR: Backup verification failed"
+    exit 1
+fi
 
-# Safety: automatic verification of continuity (no missing segments), alert on gap
-verify_continuity() {
-    local last_seq
-    last_seq=$(find "$BACKUP_ROOT" -name "sequence_*.txt" -type f | sort | tail -1 | xargs basename | sed 's/sequence_\(.*\)\.txt/\1/')
-    if [[ -n "$last_seq" && "$last_seq" -ne $(( $(date +%s) - 86400 )) ]]; then
-        log "WARNING: Gap detected in backup sequence. Last: $last_seq, Current: $(date +%s)"
-        # Send alert (implement notification)
-    fi
-}
+# Update latest incremental link
+ln -sfn "$INCREMENTAL_DIR" "${BACKUP_ROOT}/latest_incremental"
 
-# DB incremental via WAL shipping / binlog capture
-backup_db_incremental() {
-    log "Starting DB incremental backup"
-    mkdir -p "$BACKUP_DIR/db"
+log "Incremental backup completed successfully: $INCREMENTAL_DIR"
 
-    # Capture binlog position
-    mysql -h"$DB_HOST" -u"$DB_USER" -p"$DB_PASS" -e "SHOW MASTER STATUS;" > "$BACKUP_DIR/db/binlog_position.txt"
+# Optional: Clean up old incrementals (keep last 30 days)
+find "$BACKUP_ROOT" -name "incremental_*" -type d -mtime +30 -exec rm -rf {} \; 2>/dev/null || true
 
-    # Flush logs to create new binlog
-    mysql -h"$DB_HOST" -u"$DB_USER" -p"$DB_PASS" -e "FLUSH LOGS;"
-
-    # Copy incremental binlogs
-    rsync -av --link-dest="$BACKUP_ROOT/base_full/db/binlogs/" /var/lib/mysql/binlogs/ "$BACKUP_DIR/db/binlogs/"
-
-    log "DB incremental backup completed"
-}
-
-# File deltas via rsync --link-dest or snapshot diffs
-backup_files_incremental() {
-    log "Starting files incremental backup"
-    mkdir -p "$BACKUP_DIR/files"
-
-    # Use rsync with --link-dest for hard links to unchanged files
-    rsync -av --link-dest="$BACKUP_ROOT/base_full/files/" "$FILE_ROOT/" "$BACKUP_DIR/files/"
-
-    log "Files incremental backup completed"
-}
-
-# Full backup (base)
-backup_full() {
-    log "Starting full backup"
-    mkdir -p "$BACKUP_DIR/db" "$BACKUP_DIR/files"
-
-    # DB dump
-    mysqldump -h"$DB_HOST" -u"$DB_USER" -p"$DB_PASS" --all-databases --single-transaction --master-data=2 > "$BACKUP_DIR/db/full_dump.sql"
-
-    # Files
-    rsync -av "$FILE_ROOT/" "$BACKUP_DIR/files/"
-
-    # Create manifest
-    echo "Full backup created on $TIMESTAMP" > "$BACKUP_DIR/manifest.txt"
-    echo "DB: $BACKUP_DIR/db/full_dump.sql" >> "$BACKUP_DIR/manifest.txt"
-    echo "Files: $BACKUP_DIR/files/" >> "$BACKUP_DIR/manifest.txt"
-
-    # Update base reference
-    ln -sfn "$BACKUP_DIR" "$BACKUP_ROOT/base_full"
-
-    log "Full backup completed"
-}
-
-# Main execution
-main() {
-    log "Starting incremental backup - Mode: $MODE"
-
-    verify_continuity
-
-    case "$MODE" in
-        full)
-            backup_full
-            ;;
-        db)
-            check_base_backup
-            backup_db_incremental
-            ;;
-        files)
-            check_base_backup
-            backup_files_incremental
-            ;;
-        *)
-            log "ERROR: Invalid mode. Use: full, db, or files"
-            exit 1
-            ;;
-    esac
-
-    # Update sequence number
-    echo "$TIMESTAMP" > "$BACKUP_ROOT/sequence_${TIMESTAMP}.txt"
-
-    # Compress and encrypt if needed
-    # tar -czf "$BACKUP_DIR.tar.gz" -C "$BACKUP_ROOT" "$TIMESTAMP"
-    # gpg --encrypt "$BACKUP_DIR.tar.gz"
-
-    log "Backup completed successfully"
-}
-
-main "$@"
+exit 0

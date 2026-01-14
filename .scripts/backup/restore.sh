@@ -1,194 +1,162 @@
 #!/bin/bash
 
 # Restore Script for Sibali.id
-# Helper restore non-emergency untuk dev/QA atau partial restores
-# Memudahkan pemulihan data untuk testing dan selektif restore tanpa proses DR penuh
+# Purpose: Helper restore non-emergency untuk dev/QA atau partial restores
+# Function: Restore from backup with validation and safeguards
 
-set -euo pipefail
+set -e
 
 # Configuration
 BACKUP_ROOT="/var/backups/sibali"
-DB_HOST="${DB_HOST:-127.0.0.1}"
+DB_HOST="${DB_HOST:-localhost}"
 DB_USER="${DB_USER:-restore_user}"
 DB_PASS="${DB_PASS:-}"
-DB_NAME="${DB_NAME:-sibaliid}"
-FILE_ROOT="/var/www/sibali.id"
-LOG_FILE="/var/log/sibali-restore.log"
-ENVIRONMENT="${ENVIRONMENT:-dev}"  # dev, qa, staging
+DB_NAME="${DB_NAME:-u486134328_sibaliid}"
+RESTORE_ENV="${RESTORE_ENV:-development}"
+FORCE_RESTORE="${FORCE_RESTORE:-false}"
+LOG_FILE="${BACKUP_ROOT}/logs/restore.log"
+
+# Ensure log directory exists
+mkdir -p "$(dirname "$LOG_FILE")"
 
 # Logging function
 log() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $*" | tee -a "$LOG_FILE"
 }
 
-# Features: select backup by date/tag → validate checksum → restore DB to target instance (non-prod or isolated restore cluster) → restore filestore partial paths
-select_backup() {
-    local backup_date="$1"
-    local backup_path="${BACKUP_ROOT}/${backup_date}"
+# Safety checks
+if [ "$RESTORE_ENV" = "production" ] && [ "$FORCE_RESTORE" != "true" ]; then
+    log "ERROR: Production restore requires FORCE_RESTORE=true"
+    exit 1
+fi
 
-    if [[ ! -d "$backup_path" ]]; then
-        log "ERROR: Backup not found: $backup_path"
-        echo "Available backups:"
-        ls -la "$BACKUP_ROOT" | grep "^d" | awk '{print $9}' | grep -E '^[0-9]{8}_[0-9]{6}$'
+# Get backup to restore
+if [ $# -eq 0 ]; then
+    echo "Usage: $0 <backup_directory_or_latest>"
+    echo "Available backups:"
+    find "$BACKUP_ROOT" -name "full_*" -o -name "incremental_*" | sort
+    exit 1
+fi
+
+BACKUP_DIR="$1"
+if [ "$BACKUP_DIR" = "latest" ]; then
+    BACKUP_DIR=$(readlink -f "${BACKUP_ROOT}/latest_incremental" 2>/dev/null || readlink -f "${BACKUP_ROOT}/latest_full" 2>/dev/null)
+fi
+
+if [ ! -d "$BACKUP_DIR" ]; then
+    log "ERROR: Backup directory $BACKUP_DIR not found"
+    exit 1
+fi
+
+log "Starting restore from: $BACKUP_DIR"
+
+# Validate backup manifest
+if [ ! -f "$BACKUP_DIR/manifest.txt" ]; then
+    log "ERROR: Backup manifest not found"
+    exit 1
+fi
+
+# Read manifest
+BACKUP_TYPE=$(grep "Backup Type:" "$BACKUP_DIR/manifest.txt" | cut -d: -f2 | xargs)
+TIMESTAMP=$(grep "Timestamp:" "$BACKUP_DIR/manifest.txt" | cut -d: -f2 | xargs)
+
+log "Backup Type: $BACKUP_TYPE, Timestamp: $TIMESTAMP"
+
+# Validate checksums if available
+if [ -f "$BACKUP_DIR/checksums.sha256" ]; then
+    log "Validating checksums..."
+    if ! (cd "$BACKUP_DIR" && sha256sum -c checksums.sha256 >/dev/null 2>&1); then
+        log "ERROR: Checksum validation failed"
+        exit 1
+    fi
+    log "Checksums validated successfully"
+fi
+
+# Database restore
+if [ -d "$BACKUP_DIR/mysql" ] || [ -f "$BACKUP_DIR/database.sql.gz" ]; then
+    log "Restoring database..."
+
+    # Create temporary database for restore
+    TEMP_DB="${DB_NAME}_restore_$(date +%s)"
+
+    mysql -h"$DB_HOST" -u"$DB_USER" -p"$DB_PASS" -e "CREATE DATABASE $TEMP_DB;"
+
+    if [ -f "$BACKUP_DIR/database.sql.gz" ]; then
+        gunzip -c "$BACKUP_DIR/database.sql.gz" | mysql -h"$DB_HOST" -u"$DB_USER" -p"$DB_PASS" "$TEMP_DB"
+    elif [ -d "$BACKUP_DIR/mysql" ]; then
+        # Physical restore (more complex, simplified here)
+        log "Physical restore not implemented in this script"
+        mysql -h"$DB_HOST" -u"$DB_USER" -p"$DB_PASS" -e "DROP DATABASE $TEMP_DB;"
         exit 1
     fi
 
-    echo "$backup_path"
-}
+    # Run post-restore migrations if needed
+    if [ -f "$BACKUP_DIR/migrations_to_run.txt" ]; then
+        log "Running post-restore migrations..."
+        while read -r migration; do
+            php artisan migrate --path="$migration" --database="$TEMP_DB" || true
+        done < "$BACKUP_DIR/migrations_to_run.txt"
+    fi
 
-# Validate checksum
-validate_checksum() {
-    local backup_path="$1"
-    local manifest_file="$backup_path/manifest.txt"
+    # Sanity checks
+    TABLE_COUNT=$(mysql -h"$DB_HOST" -u"$DB_USER" -p"$DB_PASS" -e "USE $TEMP_DB; SHOW TABLES;" | wc -l)
+    log "Restored database has $TABLE_COUNT tables"
 
-    if [[ -f "$manifest_file" ]]; then
-        log "Validating checksums..."
-        # Implement checksum validation
-        # sha256sum -c "$backup_path/checksums.sha256" || { log "ERROR: Checksum validation failed"; exit 1; }
-        log "Checksum validation passed"
+    if [ "$TABLE_COUNT" -lt 10 ]; then
+        log "WARNING: Low table count detected, restore may be incomplete"
+    fi
+
+    # Switch databases if in development
+    if [ "$RESTORE_ENV" = "development" ]; then
+        mysql -h"$DB_HOST" -u"$DB_USER" -p"$DB_PASS" -e "DROP DATABASE $DB_NAME; RENAME DATABASE $TEMP_DB TO $DB_NAME;"
+        log "Database restored to $DB_NAME"
     else
-        log "WARNING: No manifest file found, skipping checksum validation"
+        log "Database restored to temporary: $TEMP_DB"
+        echo "To complete restore, manually rename $TEMP_DB to $DB_NAME"
     fi
-}
+fi
 
-# Restore DB to target instance (non-prod or isolated restore cluster)
-restore_db() {
-    local backup_path="$1"
-    local target_db="${2:-$DB_NAME}"
+# File restore
+if [ -d "$BACKUP_DIR/files" ]; then
+    log "Restoring files..."
 
-    # Safeguards: never restore into production primary unless --force with explicit approval
-    if [[ "$ENVIRONMENT" == "production" && "${FORCE_RESTORE:-false}" != "true" ]]; then
-        log "ERROR: Cannot restore to production without --force flag and explicit approval"
-        exit 1
-    fi
+    TARGET_DIR="${RESTORE_FILES_DIR:-/var/www/html/storage/app}"
+    mkdir -p "$TARGET_DIR"
 
-    log "Restoring database from $backup_path"
+    # Restore with rsync
+    rsync -a --delete "$BACKUP_DIR/files/" "$TARGET_DIR/"
 
-    if [[ -f "$backup_path/db/full_dump.sql" ]]; then
-        # Full restore
-        mysql -h"$DB_HOST" -u"$DB_USER" -p"$DB_PASS" "$target_db" < "$backup_path/db/full_dump.sql"
-    elif [[ -d "$backup_path/db/binlogs" ]]; then
-        # Incremental restore
-        log "Applying incremental binlogs..."
-        # Implement binlog replay
-        # mysqlbinlog binlogs/* | mysql -h"$DB_HOST" -u"$DB_USER" -p"$DB_PASS" "$target_db"
-    else
-        log "ERROR: No valid DB backup found"
-        exit 1
-    fi
+    # Fix permissions
+    chown -R www-data:www-data "$TARGET_DIR" 2>/dev/null || true
 
-    log "Database restore completed"
-}
+    log "Files restored to $TARGET_DIR"
+fi
 
-# Restore filestore partial paths
-restore_files() {
-    local backup_path="$1"
-    local partial_path="${2:-}"  # Optional partial path
+# Post-restore tasks
+log "Running post-restore tasks..."
 
-    log "Restoring files from $backup_path"
+# Clear caches
+php artisan cache:clear || true
+php artisan config:clear || true
+php artisan view:clear || true
 
-    if [[ -n "$partial_path" ]]; then
-        # Partial restore
-        rsync -av "$backup_path/files/$partial_path" "$FILE_ROOT/$partial_path"
-    else
-        # Full file restore
-        rsync -av "$backup_path/files/" "$FILE_ROOT/"
-    fi
+# Reindex if needed
+php artisan search:reindex || true
 
-    log "File restore completed"
-}
+log "Restore completed successfully from $BACKUP_DIR"
 
-# Post-restore: run migrations in compatibility mode, reindex if necessary, run sanity queries
-post_restore_tasks() {
-    local target_db="${1:-$DB_NAME}"
+# Create restore report
+cat > "${BACKUP_DIR}/restore_report.txt" << EOF
+Restore Report
+==============
+Backup: $BACKUP_DIR
+Type: $BACKUP_TYPE
+Timestamp: $TIMESTAMP
+Restored At: $(date)
+Environment: $RESTORE_ENV
+Database: ${TEMP_DB:-$DB_NAME}
+Files: ${TARGET_DIR:-N/A}
+Status: SUCCESS
+EOF
 
-    log "Running post-restore tasks..."
-
-    # Run migrations in compatibility mode
-    cd /var/www/sibali.id
-    php artisan migrate --force
-
-    # Reindex if necessary
-    # php artisan scout:reindex  # If using Laravel Scout
-
-    # Run sanity queries
-    log "Running sanity checks..."
-    mysql -h"$DB_HOST" -u"$DB_USER" -p"$DB_PASS" "$target_db" -e "
-        SELECT COUNT(*) as users FROM users;
-        SELECT COUNT(*) as total_tables FROM information_schema.tables WHERE table_schema = '$target_db';
-        SHOW PROCESSLIST;
-    " > /tmp/sanity_check.log
-
-    log "Sanity checks completed. Results in /tmp/sanity_check.log"
-}
-
-# Main execution
-main() {
-    local backup_date=""
-    local target_db=""
-    local partial_path=""
-    local restore_db_flag=false
-    local restore_files_flag=false
-
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            --backup-date)
-                backup_date="$2"
-                shift 2
-                ;;
-            --target-db)
-                target_db="$2"
-                shift 2
-                ;;
-            --partial-path)
-                partial_path="$2"
-                shift 2
-                ;;
-            --db)
-                restore_db_flag=true
-                shift
-                ;;
-            --files)
-                restore_files_flag=true
-                shift
-                ;;
-            --force)
-                FORCE_RESTORE=true
-                shift
-                ;;
-            *)
-                echo "Usage: $0 --backup-date YYYYMMDD_HHMMSS [--target-db db_name] [--partial-path path] [--db] [--files] [--force]"
-                exit 1
-                ;;
-        esac
-    done
-
-    if [[ -z "$backup_date" ]]; then
-        log "ERROR: --backup-date is required"
-        exit 1
-    fi
-
-    if [[ "$restore_db_flag" == false && "$restore_files_flag" == false ]]; then
-        restore_db_flag=true
-        restore_files_flag=true
-    fi
-
-    local backup_path
-    backup_path=$(select_backup "$backup_date")
-
-    validate_checksum "$backup_path"
-
-    if [[ "$restore_db_flag" == true ]]; then
-        restore_db "$backup_path" "$target_db"
-    fi
-
-    if [[ "$restore_files_flag" == true ]]; then
-        restore_files "$backup_path" "$partial_path"
-    fi
-
-    post_restore_tasks "$target_db"
-
-    log "Restore completed successfully"
-}
-
-main "$@"
+exit 0

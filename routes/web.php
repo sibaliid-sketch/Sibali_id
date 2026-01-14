@@ -1,7 +1,9 @@
 <?php
 
+use App\Http\Controllers\Auth\EnhancedLoginController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\RegisterController;
+use App\Http\Controllers\Auth\RoleRedirectController;
 use App\Http\Controllers\Dashboard\AdminDashboardController;
 use App\Http\Controllers\Dashboard\ParentDashboardController;
 use App\Http\Controllers\Dashboard\StudentDashboardController;
@@ -31,13 +33,22 @@ Route::get('/contact', function () {
 
 // Authentication Routes
 Route::middleware('guest')->group(function () {
-    Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login');
-    Route::post('/login', [LoginController::class, 'login']);
+    // Enhanced Login Routes
+    Route::get('/login', [EnhancedLoginController::class, 'showLoginForm'])->name('login');
+    Route::post('/login', [EnhancedLoginController::class, 'login'])->name('enhanced.login');
+
+    // Legacy Login (fallback)
+    Route::get('/login/basic', [LoginController::class, 'showLoginForm'])->name('login.basic');
+    Route::post('/login/basic', [LoginController::class, 'login'])->name('login.basic.post');
+
     Route::get('/register', [RegisterController::class, 'showRegistrationForm'])->name('register');
     Route::post('/register', [RegisterController::class, 'register']);
 });
 
 Route::post('/logout', [LoginController::class, 'logout'])->name('logout')->middleware('auth');
+
+// Post-login redirect
+Route::middleware('auth')->get('/redirect', [RoleRedirectController::class, 'redirect'])->name('auth.redirect');
 
 // Dashboard Routes (Protected)
 Route::middleware(['auth'])->group(function () {

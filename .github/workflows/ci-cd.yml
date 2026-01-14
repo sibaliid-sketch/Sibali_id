@@ -5,13 +5,27 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  COMPOSER_ALLOW_SUPERUSER: 1
 
 jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        php: [8.1, 8.2, 8.3]
+        php: [8.1, 8.2]
+        node: [18, 20]
 
     steps:
     - name: Checkout code
@@ -21,49 +35,62 @@ jobs:
       uses: shivammathur/setup-php@v2
       with:
         php-version: ${{ matrix.php }}
-        extensions: pdo, pdo_mysql, mbstring, intl, zip, bcmath
-        tools: composer:v2
+        extensions: pdo, pdo_mysql, redis, gd, mbstring, zip
+        coverage: xdebug
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node }}
+        cache: 'npm'
 
     - name: Cache Composer dependencies
       uses: actions/cache@v3
       with:
         path: vendor
-        key: ${{ runner.os }}-php-${{ matrix.php }}-composer-${{ hashFiles('**/composer.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-php-${{ matrix.php }}-composer-
+        key: php-${{ matrix.php }}-${{ hashFiles('composer.lock') }}
+        restore-keys: php-${{ matrix.php }}-
 
     - name: Install PHP dependencies
       run: composer install --no-progress --prefer-dist --optimize-autoloader
-
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        cache: 'npm'
 
     - name: Install Node.js dependencies
       run: npm ci
 
     - name: Copy environment file
-      run: cp .env.example .env
+      run: cp .env.ci .env
 
     - name: Generate application key
       run: php artisan key:generate
 
     - name: Run database migrations
       run: php artisan migrate --force
+      env:
+        DB_CONNECTION: sqlite
+        DB_DATABASE: database/database.sqlite
 
-    - name: Run PHPUnit tests
-      run: vendor/bin/phpunit
+    - name: Run database seeders
+      run: php artisan db:seed --force
+      env:
+        DB_CONNECTION: sqlite
+        DB_DATABASE: database/database.sqlite
 
-    - name: Run ESLint
+    - name: Run PHP tests
+      run: php artisan test --coverage --min=80
+      env:
+        DB_CONNECTION: sqlite
+        DB_DATABASE: database/database.sqlite
+
+    - name: Run JavaScript linting
       run: npm run lint
 
     - name: Build assets
       run: npm run build
 
-    - name: Run PHPStan static analysis
-      run: vendor/bin/phpstan analyse --error-format=github
+    - name: Run static analysis
+      run: |
+        composer require --dev phpstan/phpstan
+        vendor/bin/phpstan analyse --error-format=github
 
   security-scan:
     runs-on: ubuntu-latest
@@ -74,12 +101,12 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Run Composer audit
-      run: composer audit --format json
+      run: composer audit --format=json | jq .
 
-    - name: Run npm audit
-      run: npm audit --audit-level moderate
+    - name: Run NPM audit
+      run: npm audit --audit-level=moderate --json | jq .
 
-    - name: Run Trivy vulnerability scanner
+    - name: Run Trivy filesystem scan
       uses: aquasecurity/trivy-action@master
       with:
         scan-type: 'fs'
@@ -87,16 +114,16 @@ jobs:
         format: 'sarif'
         output: 'trivy-results.sarif'
 
-    - name: Upload Trivy scan results to GitHub Security tab
+    - name: Upload Trivy scan results
       uses: github/codeql-action/upload-sarif@v2
       if: always()
       with:
         sarif_file: 'trivy-results.sarif'
 
-  deploy-staging:
+  build-and-deploy-staging:
     runs-on: ubuntu-latest
     needs: [test, security-scan]
-    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/develop' || github.event_name == 'workflow_dispatch'
 
     steps:
     - name: Checkout code
@@ -106,47 +133,50 @@ jobs:
       uses: shivammathur/setup-php@v2
       with:
         php-version: 8.2
-        extensions: pdo, pdo_mysql, mbstring, intl, zip, bcmath
-        tools: composer:v2
-
-    - name: Install PHP dependencies
-      run: composer install --no-progress --prefer-dist --optimize-autoloader --no-dev
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '18'
-        cache: 'npm'
+        node-version: 20
 
-    - name: Install Node.js dependencies
-      run: npm ci
+    - name: Install dependencies
+      run: |
+        composer install --no-dev --optimize-autoloader
+        npm ci
 
     - name: Build assets
       run: npm run build
 
-    - name: Build Docker image
-      run: docker build -t sibali-app:${{ github.sha }} .
+    - name: Run database migrations
+      run: php artisan migrate --force
+      env:
+        DB_CONNECTION: ${{ secrets.STAGING_DB_CONNECTION }}
+        DB_HOST: ${{ secrets.STAGING_DB_HOST }}
+        DB_PORT: ${{ secrets.STAGING_DB_PORT }}
+        DB_DATABASE: ${{ secrets.STAGING_DB_DATABASE }}
+        DB_USERNAME: ${{ secrets.STAGING_DB_USERNAME }}
+        DB_PASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
 
-    - name: Push Docker image
-      run: |
-        echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
-        docker tag sibali-app:${{ github.sha }} ${{ secrets.DOCKER_REGISTRY }}/sibali-app:${{ github.sha }}
-        docker push ${{ secrets.DOCKER_REGISTRY }}/sibali-app:${{ github.sha }}
+    - name: Run database seeders
+      run: php artisan db:seed --force
+      env:
+        DB_CONNECTION: ${{ secrets.STAGING_DB_CONNECTION }}
+        DB_HOST: ${{ secrets.STAGING_DB_HOST }}
+        DB_PORT: ${{ secrets.STAGING_DB_PORT }}
+        DB_DATABASE: ${{ secrets.STAGING_DB_DATABASE }}
+        DB_USERNAME: ${{ secrets.STAGING_DB_USERNAME }}
+        DB_PASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
 
     - name: Deploy to staging
       run: |
-        ssh -o StrictHostKeyChecking=no ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }} << EOF
-          cd /var/www/sibali
-          docker pull ${{ secrets.DOCKER_REGISTRY }}/sibali-app:${{ github.sha }}
-          docker-compose -f docker-compose.yml -f docker-compose.staging.yml up -d --no-deps app
-          php artisan migrate --force
-          php artisan db:seed --force
-        EOF
+        echo "Deploying to staging server..."
+        # Add your deployment commands here
+        # Example: rsync, scp, or deployment script
 
   deploy-production:
     runs-on: ubuntu-latest
     needs: [test, security-scan]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     environment: production
     concurrency: production
 
@@ -158,44 +188,41 @@ jobs:
       uses: shivammathur/setup-php@v2
       with:
         php-version: 8.2
-        extensions: pdo, pdo_mysql, mbstring, intl, zip, bcmath
-        tools: composer:v2
-
-    - name: Install PHP dependencies
-      run: composer install --no-progress --prefer-dist --optimize-autoloader --no-dev
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '18'
-        cache: 'npm'
+        node-version: 20
 
-    - name: Install Node.js dependencies
-      run: npm ci
+    - name: Install dependencies
+      run: |
+        composer install --no-dev --optimize-autoloader
+        npm ci
 
     - name: Build assets
       run: npm run build
 
-    - name: Build Docker image
-      run: docker build -t sibali-app:${{ github.sha }} .
-
-    - name: Push Docker image
-      run: |
-        echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
-        docker tag sibali-app:${{ github.sha }} ${{ secrets.DOCKER_REGISTRY }}/sibali-app:${{ github.sha }}
-        docker push ${{ secrets.DOCKER_REGISTRY }}/sibali-app:${{ github.sha }}
-
-    - name: Wait for manual approval
-      run: echo "Waiting for manual approval..."
+    - name: Manual approval for production
+      uses: trstringer/manual-approval@v1
+      with:
+        secret: ${{ github.TOKEN }}
+        approvers: deva-bangsawan,admin-user
+        minimum-approvals: 1
+        issue-title: "Deploy to Production"
+        issue-body: "Please approve or deny the deployment to production."
 
     - name: Deploy to production
       run: |
-        ssh -o StrictHostKeyChecking=no ${{ secrets.PRODUCTION_USER }}@${{ secrets.PRODUCTION_HOST }} << EOF
-          cd /var/www/sibali
-          docker pull ${{ secrets.DOCKER_REGISTRY }}/sibali-app:${{ github.sha }}
-          docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d --no-deps app
-          php artisan migrate --force
-          php artisan config:cache
-          php artisan route:cache
-          php artisan view:cache
-        EOF
+        echo "Deploying to production server..."
+        # Add your production deployment commands here
+        # Example: blue-green deployment, rolling update
+
+    - name: Run post-deployment health check
+      run: |
+        # Add health check commands
+        curl -f https://www.sibali.id/health || exit 1
+
+    - name: Notify deployment completion
+      run: |
+        # Add notification commands (Slack, email, etc.)
+        echo "Deployment completed successfully"

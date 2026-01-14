@@ -1,355 +1,257 @@
 #!/bin/bash
 
 # Booking Data Backup Script for Sibali.id
-# Exports reservation/booking data for reporting and archival
+# Purpose: Helper export data reservasi/booking untuk reporting atau archival
+# Function: Export booking data with configurable options
 
 set -e
 
 # Configuration
-OUTPUT_DIR="./storage/backups/bookings"
-LOG_FILE="./storage/logs/booking_backup_$(date +"%Y%m%d_%H%M%S").log"
-DB_HOST="${DB_HOST:-127.0.0.1}"
-DB_PORT="${DB_PORT:-3306}"
-DB_NAME="${DB_NAME:-laravel}"
-DB_USER="${DB_USER:-root}"
+DB_HOST="${DB_HOST:-localhost}"
+DB_USER="${DB_USER:-backup_user}"
 DB_PASS="${DB_PASS:-}"
-
-# Export configuration
-EXPORT_FORMAT="${EXPORT_FORMAT:-csv}"  # csv or json
-DATE_FROM="${DATE_FROM:-$(date -d '1 month ago' +%Y-%m-%d)}"
+DB_NAME="${DB_NAME:-u486134328_sibaliid}"
+BACKUP_DIR="/var/backups/sibali/bookings"
+OUTPUT_FORMAT="${OUTPUT_FORMAT:-csv}"
+DATE_FROM="${DATE_FROM:-$(date -d '30 days ago' +%Y-%m-%d)}"
 DATE_TO="${DATE_TO:-$(date +%Y-%m-%d)}"
-ENCRYPT_BACKUP="${ENCRYPT_BACKUP:-true}"
-RETENTION_DAYS="${RETENTION_DAYS:-365}"
-INCREMENTAL="${INCREMENTAL:-false}"
+ENCRYPT="${ENCRYPT:-false}"
+GPG_RECIPIENT="${GPG_RECIPIENT:-}"
+LOG_FILE="/var/log/sibali/booking_backup.log"
+RETENTION_DAYS="${RETENTION_DAYS:-90}"
 
-# Columns to export (configurable)
-BOOKING_COLUMNS="id,user_id,product_kode,tingkat_pendidikan,layanan,program,kelas,jumlah_pertemuan,harga_kelas,satuan,created_at,updated_at,status"
-USER_COLUMNS="id,name,email,phone,created_at"
-
-# Create directories
-mkdir -p "$OUTPUT_DIR"
-mkdir -p "$(dirname "$LOG_FILE")"
+# Ensure directories exist
+mkdir -p "$BACKUP_DIR" "$(dirname "$LOG_FILE")"
 
 # Logging function
 log() {
-    echo "$(date +"%Y-%m-%d %H:%M:%S") - $1" | tee -a "$LOG_FILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $*" | tee -a "$LOG_FILE"
 }
-
-# Show usage
-usage() {
-    echo "Usage: $0 [OPTIONS]"
-    echo "Export booking data for Sibali.id"
-    echo ""
-    echo "OPTIONS:"
-    echo "  -f, --format FORMAT    Export format: csv or json (default: csv)"
-    echo "  -s, --start DATE       Start date (YYYY-MM-DD, default: 1 month ago)"
-    echo "  -e, --end DATE         End date (YYYY-MM-DD, default: today)"
-    echo "  -i, --incremental      Perform incremental export"
-    echo "  -n, --no-encrypt       Skip encryption"
-    echo "  -h, --help             Show this help"
-    echo ""
-    echo "Examples:"
-    echo "  $0 --format json --start 2024-01-01 --end 2024-01-31"
-    echo "  $0 --incremental  # Export only new/changed records"
-}
-
-# Parse arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        -f|--format)
-            EXPORT_FORMAT="$2"
-            shift 2
-            ;;
-        -s|--start)
-            DATE_FROM="$2"
-            shift 2
-            ;;
-        -e|--end)
-            DATE_TO="$2"
-            shift 2
-            ;;
-        -i|--incremental)
-            INCREMENTAL=true
-            shift
-            ;;
-        -n|--no-encrypt)
-            ENCRYPT_BACKUP=false
-            shift
-            ;;
-        -h|--help)
-            usage
-            exit 0
-            ;;
-        *)
-            echo "Unknown option: $1"
-            usage
-            exit 1
-            ;;
-    esac
-done
-
-# Validate dates
-validate_date() {
-    if ! date -d "$1" >/dev/null 2>&1; then
-        log "ERROR: Invalid date format: $1"
-        exit 1
-    fi
-}
-
-validate_date "$DATE_FROM"
-validate_date "$DATE_TO"
 
 # Generate filename
-TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-FILENAME="bookings_${DATE_FROM}_${DATE_TO}_${TIMESTAMP}"
-OUTPUT_FILE="$OUTPUT_DIR/${FILENAME}.$EXPORT_FORMAT"
+generate_filename() {
+    local timestamp=$(date +%Y%m%d_%H%M%S)
+    local format="$OUTPUT_FORMAT"
+    local encrypted_suffix=""
 
-# Function to test database connection
-test_db_connection() {
-    if ! mysql -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASS" -e "SELECT 1;" "$DB_NAME" >/dev/null 2>&1; then
-        log "ERROR: Cannot connect to database"
-        exit 1
+    if [ "$ENCRYPT" = "true" ]; then
+        encrypted_suffix=".gpg"
     fi
+
+    echo "bookings_${DATE_FROM}_to_${DATE_TO}_${timestamp}.${format}${encrypted_suffix}"
 }
 
-# Function to get last export timestamp for incremental
-get_last_export_timestamp() {
-    local last_file
-    last_file=$(find "$OUTPUT_DIR" -name "bookings_*.${EXPORT_FORMAT}" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-)
+# Export to CSV
+export_csv() {
+    local output_file="$1"
 
-    if [ -n "$last_file" ] && [ -f "$last_file" ]; then
-        # Extract timestamp from filename or file modification time
-        stat -c %Y "$last_file" 2>/dev/null || stat -f %m "$last_file" 2>/dev/null || date +%s
-    else
-        echo "0"  # No previous export
-    fi
-}
+    log "Exporting bookings to CSV..."
 
-# Function to export bookings to CSV
-export_to_csv() {
-    log "Exporting bookings to CSV format..."
-
-    # Create temporary SQL file
-    local sql_file="/tmp/booking_export_$$.sql"
-
-    cat > "$sql_file" << EOF
-SELECT
-    b.id,
-    b.user_id,
-    b.product_kode,
-    b.tingkat_pendidikan,
-    b.layanan,
-    b.program,
-    b.kelas,
-    b.jumlah_pertemuan,
-    b.harga_kelas,
-    b.satuan,
-    b.created_at,
-    b.updated_at,
-    b.status,
-    u.name as user_name,
-    u.email as user_email,
-    u.phone as user_phone
-FROM bookings b
-LEFT JOIN users u ON b.user_id = u.id
-WHERE b.created_at BETWEEN '$DATE_FROM 00:00:00' AND '$DATE_TO 23:59:59'
+    # CSV Header
+    cat > "$output_file" << EOF
+id,student_id,class_id,booking_date,status,created_at,updated_at,student_name,class_name,teacher_name
 EOF
 
-    if [ "$INCREMENTAL" = true ]; then
-        local last_timestamp
-        last_timestamp=$(get_last_export_timestamp)
-        echo "AND b.updated_at > FROM_UNIXTIME($last_timestamp)" >> "$sql_file"
-        log "Incremental export: only records updated after $(date -d "@$last_timestamp" 2>/dev/null || echo "timestamp $last_timestamp")"
-    fi
+    # Export data
+    mysql -h"$DB_HOST" -u"$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "
+        SELECT
+            b.id,
+            b.student_id,
+            b.class_id,
+            b.created_at as booking_date,
+            b.status,
+            b.created_at,
+            b.updated_at,
+            COALESCE(s.name, '') as student_name,
+            COALESCE(c.name, '') as class_name,
+            COALESCE(t.name, '') as teacher_name
+        FROM class_bookings b
+        LEFT JOIN students s ON b.student_id = s.id
+        LEFT JOIN classes c ON b.class_id = c.id
+        LEFT JOIN employees t ON c.teacher_id = t.id
+        WHERE DATE(b.created_at) BETWEEN '$DATE_FROM' AND '$DATE_TO'
+        ORDER BY b.created_at DESC
+    " 2>/dev/null | sed 's/\t/","/g;s/^/"/;s/$/"/;s/\n//g' >> "$output_file"
 
-    echo "ORDER BY b.created_at DESC;" >> "$sql_file"
-
-    # Execute query and export to CSV
-    {
-        echo "# Booking Data Export"
-        echo "# Generated: $(date)"
-        echo "# Date Range: $DATE_FROM to $DATE_TO"
-        echo "# Format: CSV"
-        echo "# Columns: id,user_id,product_kode,tingkat_pendidikan,layanan,program,kelas,jumlah_pertemuan,harga_kelas,satuan,created_at,updated_at,status,user_name,user_email,user_phone"
-        mysql -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASS" "$DB_NAME" < "$sql_file"
-    } > "$OUTPUT_FILE"
-
-    # Clean up
-    rm -f "$sql_file"
-
-    log "CSV export completed: $OUTPUT_FILE"
+    log "CSV export completed"
 }
 
-# Function to export bookings to JSON
-export_to_json() {
-    log "Exporting bookings to JSON format..."
+# Export to JSON
+export_json() {
+    local output_file="$1"
 
-    # Create temporary SQL file
-    local sql_file="/tmp/booking_export_$$.sql"
+    log "Exporting bookings to JSON..."
 
-    cat > "$sql_file" << EOF
-SELECT
-    JSON_OBJECT(
-        'id', b.id,
-        'user_id', b.user_id,
-        'product_kode', b.product_kode,
-        'tingkat_pendidikan', b.tingkat_pendidikan,
-        'layanan', b.layanan,
-        'program', b.program,
-        'kelas', b.kelas,
-        'jumlah_pertemuan', b.jumlah_pertemuan,
-        'harga_kelas', b.harga_kelas,
-        'satuan', b.satuan,
-        'created_at', b.created_at,
-        'updated_at', b.updated_at,
-        'status', b.status,
-        'user', JSON_OBJECT(
-            'name', u.name,
-            'email', u.email,
-            'phone', u.phone
-        )
-    ) as booking_json
-FROM bookings b
-LEFT JOIN users u ON b.user_id = u.id
-WHERE b.created_at BETWEEN '$DATE_FROM 00:00:00' AND '$DATE_TO 23:59:59'
-EOF
+    # Export data as JSON
+    mysql -h"$DB_HOST" -u"$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "
+        SELECT
+            JSON_OBJECT(
+                'id', b.id,
+                'student_id', b.student_id,
+                'class_id', b.class_id,
+                'booking_date', b.created_at,
+                'status', b.status,
+                'created_at', b.created_at,
+                'updated_at', b.updated_at,
+                'student', JSON_OBJECT(
+                    'id', s.id,
+                    'name', s.name,
+                    'email', s.email
+                ),
+                'class', JSON_OBJECT(
+                    'id', c.id,
+                    'name', c.name,
+                    'schedule', c.schedule
+                ),
+                'teacher', JSON_OBJECT(
+                    'id', t.id,
+                    'name', t.name
+                )
+            ) as booking_json
+        FROM class_bookings b
+        LEFT JOIN students s ON b.student_id = s.id
+        LEFT JOIN classes c ON b.class_id = c.id
+        LEFT JOIN employees t ON c.teacher_id = t.id
+        WHERE DATE(b.created_at) BETWEEN '$DATE_FROM' AND '$DATE_TO'
+        ORDER BY b.created_at DESC
+    " 2>/dev/null | jq -s '.' > "$output_file"
 
-    if [ "$INCREMENTAL" = true ]; then
-        local last_timestamp
-        last_timestamp=$(get_last_export_timestamp)
-        echo "AND b.updated_at > FROM_UNIXTIME($last_timestamp)" >> "$sql_file"
-        log "Incremental export: only records updated after $(date -d "@$last_timestamp" 2>/dev/null || echo "timestamp $last_timestamp")"
-    fi
-
-    echo "ORDER BY b.created_at DESC;" >> "$sql_file"
-
-    # Execute query and format as JSON array
-    {
-        echo "{"
-        echo "  \"export_info\": {"
-        echo "    \"generated_at\": \"$(date -Iseconds)\","
-        echo "    \"date_range\": {\"from\": \"$DATE_FROM\", \"to\": \"$DATE_TO\"},"
-        echo "    \"format\": \"JSON\","
-        echo "    \"incremental\": $INCREMENTAL"
-        echo "  },"
-        echo "  \"bookings\": ["
-        mysql -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASS" "$DB_NAME" < "$sql_file" | sed '$!s/$/,/' | sed 's/^/    /'
-        echo "  ]"
-        echo "}"
-    } > "$OUTPUT_FILE"
-
-    # Clean up
-    rm -f "$sql_file"
-
-    log "JSON export completed: $OUTPUT_FILE"
+    log "JSON export completed"
 }
 
-# Function to encrypt backup
-encrypt_backup() {
-    if [ "$ENCRYPT_BACKUP" != true ]; then
-        log "Skipping encryption as requested"
-        return
-    fi
+# Encrypt file
+encrypt_file() {
+    local input_file="$1"
+    local output_file="$2"
 
-    log "Encrypting backup file..."
+    if [ "$ENCRYPT" = "true" ]; then
+        log "Encrypting backup file..."
 
-    # Check if gpg is available
-    if ! command -v gpg &> /dev/null; then
-        log "WARNING: GPG not available, skipping encryption"
-        return
-    fi
+        if [ -n "$GPG_RECIPIENT" ]; then
+            gpg --encrypt --recipient "$GPG_RECIPIENT" --output "$output_file" "$input_file"
+        else
+            # Symmetric encryption
+            gpg --symmetric --output "$output_file" "$input_file"
+        fi
 
-    # Encrypt file
-    local encrypted_file="${OUTPUT_FILE}.gpg"
-    if gpg --batch --yes --passphrase-file <(echo "$BACKUP_PASSPHRASE") -c "$OUTPUT_FILE"; then
-        mv "${OUTPUT_FILE}.gpg" "$encrypted_file"
-        rm "$OUTPUT_FILE"
-        OUTPUT_FILE="$encrypted_file"
-        log "Backup encrypted: $OUTPUT_FILE"
+        # Remove unencrypted file
+        rm -f "$input_file"
+
+        log "File encrypted"
     else
-        log "WARNING: Encryption failed, keeping unencrypted file"
+        mv "$input_file" "$output_file"
     fi
 }
 
-# Function to generate checksum
+# Generate checksum
 generate_checksum() {
-    local checksum_file="${OUTPUT_FILE}.sha256"
-    sha256sum "$OUTPUT_FILE" > "$checksum_file"
+    local file="$1"
+    local checksum_file="$file.sha256"
+
+    sha256sum "$file" > "$checksum_file"
     log "Checksum generated: $checksum_file"
 }
 
-# Function to add retention metadata
-add_retention_metadata() {
-    local metadata_file="${OUTPUT_FILE}.meta"
+# Create metadata
+create_metadata() {
+    local data_file="$1"
+    local meta_file="$data_file.meta.json"
 
-    cat > "$metadata_file" << EOF
+    local record_count=0
+    if [ "$OUTPUT_FORMAT" = "csv" ]; then
+        record_count=$(wc -l < "$data_file")
+        record_count=$((record_count - 1))  # Subtract header
+    elif [ "$OUTPUT_FORMAT" = "json" ]; then
+        record_count=$(jq '. | length' "$data_file" 2>/dev/null || echo "0")
+    fi
+
+    local file_size=$(stat -f%z "$data_file" 2>/dev/null || stat -c%s "$data_file")
+
+    cat > "$meta_file" << EOF
 {
-  "filename": "$(basename "$OUTPUT_FILE")",
+  "backup_type": "bookings",
+  "format": "$OUTPUT_FORMAT",
+  "date_from": "$DATE_FROM",
+  "date_to": "$DATE_FROM",
+  "record_count": $record_count,
+  "file_size_bytes": $file_size,
+  "encrypted": $ENCRYPT,
   "created_at": "$(date -Iseconds)",
-  "date_range": {
-    "from": "$DATE_FROM",
-    "to": "$DATE_TO"
-  },
-  "format": "$EXPORT_FORMAT",
-  "incremental": $INCREMENTAL,
-  "encrypted": $ENCRYPT_BACKUP,
+  "created_by": "$(whoami)",
   "retention_days": $RETENTION_DAYS,
-  "purge_date": "$(date -d "+$RETENTION_DAYS days" +%Y-%m-%d)",
-  "checksum": "$(sha256sum "$OUTPUT_FILE" | cut -d' ' -f1)",
-  "record_count": $(wc -l < "$OUTPUT_FILE")
+  "checksum": "$(sha256sum "$data_file" | cut -d' ' -f1)"
 }
 EOF
 
-    log "Retention metadata created: $metadata_file"
+    log "Metadata created: $meta_file"
 }
 
-# Function to clean up old backups
+# Cleanup old backups
 cleanup_old_backups() {
-    log "Cleaning up backups older than $RETENTION_DAYS days..."
+    log "Cleaning up old backups (retention: ${RETENTION_DAYS} days)..."
 
-    find "$OUTPUT_DIR" -name "bookings_*.${EXPORT_FORMAT}*" -type f -mtime +$RETENTION_DAYS -delete 2>/dev/null || true
-    find "$OUTPUT_DIR" -name "bookings_*.meta" -type f -mtime +$RETENTION_DAYS -delete 2>/dev/null || true
+    find "$BACKUP_DIR" -name "bookings_*.${OUTPUT_FORMAT}*" -mtime +$RETENTION_DAYS -delete 2>/dev/null || true
+    find "$BACKUP_DIR" -name "bookings_*.meta.json" -mtime +$RETENTION_DAYS -delete 2>/dev/null || true
+    find "$BACKUP_DIR" -name "bookings_*.sha256" -mtime +$RETENTION_DAYS -delete 2>/dev/null || true
 
-    log "Old backup cleanup completed"
+    log "Cleanup completed"
+}
+
+# Validate date range
+validate_dates() {
+    if ! date -d "$DATE_FROM" >/dev/null 2>&1; then
+        log "ERROR: Invalid DATE_FROM: $DATE_FROM"
+        exit 1
+    fi
+
+    if ! date -d "$DATE_TO" >/dev/null 2>&1; then
+        log "ERROR: Invalid DATE_TO: $DATE_TO"
+        exit 1
+    fi
+
+    if [[ "$DATE_FROM" > "$DATE_TO" ]]; then
+        log "ERROR: DATE_FROM cannot be after DATE_TO"
+        exit 1
+    fi
 }
 
 # Main execution
-log "Starting booking data backup for Sibali.id"
+log "Starting booking data backup"
 log "Date range: $DATE_FROM to $DATE_TO"
-log "Format: $EXPORT_FORMAT"
-log "Incremental: $INCREMENTAL"
-log "Encryption: $ENCRYPT_BACKUP"
+log "Format: $OUTPUT_FORMAT, Encrypted: $ENCRYPT"
 
-test_db_connection
+validate_dates
+
+# Generate temporary file
+temp_file=$(mktemp)
+final_filename=$(generate_filename)
+final_file="$BACKUP_DIR/$final_filename"
 
 # Export data
-case "$EXPORT_FORMAT" in
+case "$OUTPUT_FORMAT" in
     csv)
-        export_to_csv
+        export_csv "$temp_file"
         ;;
     json)
-        export_to_json
+        export_json "$temp_file"
         ;;
     *)
-        log "ERROR: Unsupported format: $EXPORT_FORMAT"
+        log "ERROR: Unsupported format: $OUTPUT_FORMAT"
         exit 1
         ;;
 esac
 
-encrypt_backup
-generate_checksum
-add_retention_metadata
+# Encrypt if requested
+encrypt_file "$temp_file" "$final_file"
+
+# Generate checksum and metadata
+generate_checksum "$final_file"
+create_metadata "$final_file"
+
+# Cleanup old backups
 cleanup_old_backups
 
-log "Booking backup completed successfully"
-log "Output file: $OUTPUT_FILE"
-log "Log file: $LOG_FILE"
+log "Booking backup completed: $final_file"
+log "Records exported: $(grep '"record_count"' "$final_file.meta.json" | cut -d: -f2 | tr -d ' ,')"
 
-echo "Backup Summary:"
-echo "- File: $OUTPUT_FILE"
-echo "- Format: $EXPORT_FORMAT"
-echo "- Date Range: $DATE_FROM to $DATE_TO"
-echo "- Incremental: $INCREMENTAL"
-echo "- Encrypted: $ENCRYPT_BACKUP"
-echo "- Retention: $RETENTION_DAYS days"
-echo "- Log: $LOG_FILE"
+exit 0

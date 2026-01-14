@@ -626,3 +626,25 @@ Below is a comprehensive list of all files and directories in the workspace, org
 - **tests/TestCase.php**: Base test class. Purpose: Defines test setup and helpers. Function: Base class for all tests. Interconnected with: PHPUnit configuration.
 - **tests/Feature/ExampleTest.php**: Example feature test. Purpose: Demonstrates feature testing. Function: Tests application features. Interconnected with: Routes and controllers.
 - **tests/Unit/ExampleTest.php**: Example unit test. Purpose: Demonstrates unit testing. Function: Tests individual components. Interconnected with: Classes and methods.
+
+### app/Http/Controllers/Auth/ Directory (Authentication Controllers)
+- **app/Http/Controllers/Auth/EnhancedLoginController.php**: Login lanjutan (role-aware). Purpose: Multi-guard login, device recognition, conditional challenges (step-up). Function: Integrates device fingerprinting, risk assessment, CAPTCHA, 2FA. Interconnected with: DeviceFingerprintingService, RiskAssessmentService, UserDevice model.
+- **app/Http/Controllers/Auth/ForgotPasswordController.php**: Validasi reset password. Purpose: Ensure contact exists and rate-limit. Function: Issue reset tokens & email links. Interconnected with: Password Broker, email templates.
+- **app/Http/Controllers/Auth/ResetPasswordController.php**: Validasi reset password. Purpose: Validate token, set new password, revoke sessions. Function: Process password reset with security measures. Interconnected with: Password Broker, session management.
+- **app/Http/Controllers/Auth/CaptchaController.php**: Validasi CAPTCHA. Purpose: For API or submission flows. Function: Verify captcha tokens with adaptive difficulty. Interconnected with: CaptchaService, rate limiting.
+- **app/Http/Controllers/Auth/TwoFactorAuthController.php**: Validasi token 2FA. Purpose: 2FA verification. Function: Enroll/verify TOTP, SMS, Push, backup codes. Interconnected with: TwoFactorAuthService, user devices.
+- **app/Http/Controllers/Auth/SocialLoginController.php**: OAuth social login. Purpose: Login/register via Google/Facebook/Apple. Function: Uses Socialite-like adapters. Interconnected with: SocialLoginService, UserSocialAccount model.
+- **app/Http/Controllers/Auth/RoleRedirectController.php**: Post-login role redirect. Purpose: Centralize redirect logic by role/department. Function: Uses config/roles.php mapping and staffLevel. Interconnected with: User roles, department config.
+
+### app/Services/Auth/ Directory (Authentication Services)
+- **app/Services/Auth/DeviceFingerprintingService.php**: Device fingerprinting. Purpose: Generate device fingerprints, detect platform/browser. Function: Manage trusted devices, fingerprint storage. Interconnected with: UserDevice model, risk assessment.
+- **app/Services/Auth/RiskAssessmentService.php**: Risk assessment. Purpose: IP risk assessment, device trust evaluation. Function: Login pattern analysis, risk scoring. Interconnected with: DeviceFingerprintingService, firewall.
+- **app/Services/Auth/SocialLoginService.php**: Social login service. Purpose: Manage social account linking and user creation. Function: Find or create users from social providers. Interconnected with: UserSocialAccount model, Socialite.
+
+### app/Models/User/ Directory (User Models)
+- **app/Models/User/UserDevice.php**: Device model. Purpose: Store user device information. Function: Relationships with users, device trust flags. Interconnected with: DeviceFingerprintingService, authentication.
+- **app/Models/User/UserSocialAccount.php**: Social account model. Purpose: Store social login accounts. Function: Link users to social providers. Interconnected with: SocialLoginService, authentication.
+
+### database/migrations/ Directory (Additional Migrations)
+- **database/migrations/2024_01_01_000028_create_user_devices_table.php**: Create user devices table. Purpose: Store device fingerprints and trust data. Function: Migration for user_devices table. Interconnected with: UserDevice model.
+- **database/migrations/2024_01_01_000029_create_user_social_accounts_table.php**: Create user social accounts table. Purpose: Store social login provider data. Function: Migration for user_social_accounts table. Interconnected with: UserSocialAccount model.

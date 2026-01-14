@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\LandingPage;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class HomeController extends Controller
 {
@@ -92,7 +94,7 @@ class HomeController extends Controller
             ->where('active', true)
             ->first();
 
-        if (!$program) {
+        if (! $program) {
             abort(404, 'Program tidak ditemukan');
         }
 
@@ -149,7 +151,7 @@ class HomeController extends Controller
         } catch (\Exception $e) {
             Log::error('Contact form submission failed', [
                 'error' => $e->getMessage(),
-                'email' => $request->email
+                'email' => $request->email,
             ]);
 
             return redirect()->back()

@@ -1,152 +1,227 @@
 #!/bin/bash
 
-# Image Optimization Pipeline for Sibali.id
-# Converts, resizes, and optimizes images for web delivery
+# Image Optimization Script for Sibali.id
+# Purpose: Pipeline optimasi gambar: konversi, resizing, dan preset kualitas
+# Function: Bulk convert to WebP/AVIF, generate responsive sizes, apply quality presets
 
 set -e
 
 # Configuration
-SOURCE_DIR="./storage/app/public/images"
-OUTPUT_DIR="./storage/app/public/optimized"
-MANIFEST_FILE="./storage/app/public/optimized/manifest.json"
-LOG_FILE="./storage/logs/image_optimization_$(date +"%Y%m%d").log"
+SOURCE_DIR="${SOURCE_DIR:-/var/www/html/storage/app/public/images}"
+OUTPUT_DIR="${OUTPUT_DIR:-/var/www/html/storage/app/public/optimized}"
+LOG_FILE="/var/log/sibali/image_optimization.log"
+MANIFEST_FILE="$OUTPUT_DIR/manifest.json"
+QUALITY_PRESET="${QUALITY_PRESET:-80}"
+MAX_WIDTH="${MAX_WIDTH:-1920}"
+PRESERVE_EXIF="${PRESERVE_EXIF:-false}"
 
-# Quality presets
-QUALITY_PRESETS=("lossless" "lossy" "aggressive")
-SIZES=("320" "640" "1024" "1920")
+# Responsive sizes
+SIZES=(320 640 960 1280 1920)
 
-# Create directories
-mkdir -p "$OUTPUT_DIR"
-mkdir -p "$(dirname "$LOG_FILE")"
+# Ensure directories exist
+mkdir -p "$OUTPUT_DIR" "$(dirname "$LOG_FILE")"
 
 # Logging function
 log() {
-    echo "$(date +"%Y-%m-%d %H:%M:%S") - $1" | tee -a "$LOG_FILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $*" | tee -a "$LOG_FILE"
 }
 
-# Check if image is already optimized
-is_optimized() {
-    local file="$1"
-    local output_base="$OUTPUT_DIR/$(basename "$file" | sed 's/\.[^.]*$//')"
+# Check dependencies
+check_dependencies() {
+    local missing_deps=()
 
-    # Check for metadata tag or existing optimized versions
-    if [ -f "${output_base}_320.webp" ] && [ -f "${output_base}_640.webp" ]; then
-        return 0
-    else
-        return 1
+    if ! command -v convert >/dev/null 2>&1; then
+        missing_deps+=("ImageMagick (convert)")
     fi
+
+    if ! command -v cwebp >/dev/null 2>&1; then
+        missing_deps+=("WebP tools (cwebp)")
+    fi
+
+    if ! command -v avifenc >/dev/null 2>&1; then
+        missing_deps+=("AVIF tools (avifenc)")
+    fi
+
+    if [ ${#missing_deps[@]} -gt 0 ]; then
+        log "ERROR: Missing dependencies: ${missing_deps[*]}"
+        log "Please install required packages:"
+        log "  Ubuntu/Debian: apt-get install imagemagick webp libavif-bin"
+        log "  CentOS/RHEL: yum install ImageMagick webp-tools libavif"
+        exit 1
+    fi
+}
+
+# Get image info
+get_image_info() {
+    local file="$1"
+    local width height format
+
+    # Use ImageMagick to get dimensions
+    read -r width height format <<< "$(identify -format "%w %h %m" "$file" 2>/dev/null || echo "0 0 UNKNOWN")"
+
+    echo "$width $height $format"
 }
 
 # Optimize single image
 optimize_image() {
     local input_file="$1"
     local filename=$(basename "$input_file")
-    local base_name="${filename%.*}"
-    local output_base="$OUTPUT_DIR/$base_name"
+    local name="${filename%.*}"
+    local output_base="$OUTPUT_DIR/$name"
 
     log "Processing: $filename"
 
-    # Skip if already optimized
-    if is_optimized "$input_file"; then
-        log "Skipping already optimized: $filename"
-        return
+    # Get original dimensions
+    read -r orig_width orig_height format <<< "$(get_image_info "$input_file")"
+
+    if [ "$orig_width" = "0" ] || [ "$orig_height" = "0" ]; then
+        log "WARNING: Could not read image dimensions for $filename"
+        return 1
     fi
 
-    # Convert to WebP and AVIF with different sizes
+    local optimized_files=()
+
+    # Generate responsive sizes
     for size in "${SIZES[@]}"; do
-        # WebP conversion
-        if command -v cwebp &> /dev/null; then
-            cwebp -q 80 -resize "$size" 0 "$input_file" -o "${output_base}_${size}.webp" 2>/dev/null || log "WebP conversion failed for $size"
+        if [ "$orig_width" -le "$size" ]; then
+            # Original is smaller, skip upscaling
+            continue
         fi
 
-        # AVIF conversion (if available)
-        if command -v avifenc &> /dev/null; then
-            avifenc --min 20 --max 40 --speed 6 "$input_file" "${output_base}_${size}.avif" 2>/dev/null || log "AVIF conversion failed for $size"
-        fi
-    done
+        local output_file="$output_base-${size}.webp"
+        local temp_file="$output_base-${size}.tmp"
 
-    # Quality presets
-    for preset in "${QUALITY_PRESETS[@]}"; do
-        case $preset in
-            "lossless")
-                quality=100
-                ;;
-            "lossy")
-                quality=85
-                ;;
-            "aggressive")
-                quality=70
-                ;;
-        esac
+        # Resize and convert to WebP
+        if convert "$input_file" \
+                   -resize "${size}x${size}>" \
+                   -quality "$QUALITY_PRESET" \
+                   -strip \
+                   "$temp_file" 2>/dev/null; then
 
-        # JPEG optimization
-        if [[ "$filename" =~ \.(jpg|jpeg)$ ]]; then
-            if command -v jpegoptim &> /dev/null; then
-                cp "$input_file" "${output_base}_${preset}.jpg"
-                jpegoptim -m"$quality" "${output_base}_${preset}.jpg" 2>/dev/null || log "JPEG optimization failed for $preset"
+            cwebp -q "$QUALITY_PRESET" "$temp_file" -o "$output_file" 2>/dev/null
+            rm -f "$temp_file"
+
+            if [ -f "$output_file" ]; then
+                optimized_files+=("$output_file")
+                log "  Generated: ${size}px WebP"
             fi
         fi
 
-        # PNG optimization
-        if [[ "$filename" =~ \.png$ ]]; then
-            if command -v optipng &> /dev/null; then
-                cp "$input_file" "${output_base}_${preset}.png"
-                optipng -o7 "${output_base}_${preset}.png" 2>/dev/null || log "PNG optimization failed for $preset"
+        # Generate AVIF version if requested
+        if [ "${GENERATE_AVIF:-true}" = "true" ]; then
+            local avif_file="$output_base-${size}.avif"
+            if avifenc --min 20 --max 40 "$temp_file" "$avif_file" 2>/dev/null; then
+                optimized_files+=("$avif_file")
+                log "  Generated: ${size}px AVIF"
             fi
         fi
     done
 
-    log "Completed: $filename"
-}
+    # Generate original size WebP
+    local orig_webp="$output_base.webp"
+    if cwebp -q "$QUALITY_PRESET" "$input_file" -o "$orig_webp" 2>/dev/null; then
+        optimized_files+=("$orig_webp")
+        log "  Generated: Original WebP"
+    fi
 
-# Generate manifest
-generate_manifest() {
-    log "Generating optimization manifest..."
-
-    # Create JSON manifest of processed files
-    echo "{" > "$MANIFEST_FILE"
-    echo "  \"generated_at\": \"$(date -Iseconds)\"," >> "$MANIFEST_FILE"
-    echo "  \"source_dir\": \"$SOURCE_DIR\"," >> "$MANIFEST_FILE"
-    echo "  \"output_dir\": \"$OUTPUT_DIR\"," >> "$MANIFEST_FILE"
-    echo "  \"optimized_files\": [" >> "$MANIFEST_FILE"
-
-    first=true
-    find "$OUTPUT_DIR" -type f \( -name "*.webp" -o -name "*.avif" -o -name "*_lossless.*" -o -name "*_lossy.*" -o -name "*_aggressive.*" \) | while read -r file; do
-        if [ "$first" = true ]; then
-            first=false
-        else
-            echo "," >> "$MANIFEST_FILE"
+    # Generate original size AVIF
+    if [ "${GENERATE_AVIF:-true}" = "true" ]; then
+        local orig_avif="$output_base.avif"
+        if avifenc --min 20 --max 40 "$input_file" "$orig_avif" 2>/dev/null; then
+            optimized_files+=("$orig_avif")
+            log "  Generated: Original AVIF"
         fi
+    fi
 
-        relative_path="${file#$OUTPUT_DIR/}"
-        size=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null || echo "0")
-        echo "    {\"path\": \"$relative_path\", \"size\": $size}" >> "$MANIFEST_FILE"
+    # Calculate savings
+    local orig_size=$(stat -f%z "$input_file" 2>/dev/null || stat -c%s "$input_file")
+    local total_optimized_size=0
+
+    for opt_file in "${optimized_files[@]}"; do
+        if [ -f "$opt_file" ]; then
+            local opt_size=$(stat -f%z "$opt_file" 2>/dev/null || stat -c%s "$opt_file")
+            total_optimized_size=$((total_optimized_size + opt_size))
+        fi
     done
 
-    echo "  ]" >> "$MANIFEST_FILE"
-    echo "}" >> "$MANIFEST_FILE"
+    local savings_percent="0"
+    if [ "$orig_size" -gt 0 ]; then
+        savings_percent=$(echo "scale=2; (1 - $total_optimized_size / $orig_size) * 100" | bc -l 2>/dev/null || echo "0")
+    fi
 
-    log "Manifest generated: $MANIFEST_FILE"
+    # Return optimization info
+    echo "$filename $orig_size $total_optimized_size $savings_percent ${#optimized_files[@]}"
 }
 
-# Invalidate CDN cache (placeholder for CDN integration)
-invalidate_cdn() {
-    log "Invalidating CDN cache..."
-    # TODO: Integrate with CDN API (Cloudflare, AWS CloudFront, etc.)
-    # Example: curl -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/purge_cache" -H "Authorization: Bearer $TOKEN" -d '{"purge_everything":true}'
-    log "CDN invalidation placeholder - implement based on your CDN provider"
+# Update manifest
+update_manifest() {
+    local manifest_entries=()
+
+    # Read existing manifest if it exists
+    if [ -f "$MANIFEST_FILE" ]; then
+        manifest_entries=$(jq -r '.images[] | @json' "$MANIFEST_FILE" 2>/dev/null || echo "")
+    fi
+
+    # Add new entries
+    find "$OUTPUT_DIR" -name "*.webp" -o -name "*.avif" | while read -r file; do
+        local rel_path="${file#$OUTPUT_DIR/}"
+        local orig_file="$SOURCE_DIR/$(basename "$file" | sed 's/-[0-9]*\.\(webp\|avif\)$//' | sed 's/\.\(webp\|avif\)$//').*"
+
+        # Find original file
+        orig_file=$(find "$SOURCE_DIR" -name "$(basename "$orig_file")" | head -1)
+
+        if [ -f "$orig_file" ]; then
+            local orig_size=$(stat -f%z "$orig_file" 2>/dev/null || stat -c%s "$orig_file")
+            local opt_size=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file")
+            local savings=$(echo "scale=2; (1 - $opt_size / $orig_size) * 100" | bc -l 2>/dev/null || echo "0")
+
+            manifest_entries+=$(cat << EOF
+{
+  "original": "$(basename "$orig_file")",
+  "optimized": "$rel_path",
+  "original_size": $orig_size,
+  "optimized_size": $opt_size,
+  "savings_percent": $savings,
+  "optimized_at": "$(date)"
+}
+EOF
+)
+        fi
+    done
+
+    # Write new manifest
+    cat > "$MANIFEST_FILE" << EOF
+{
+  "generated_at": "$(date)",
+  "quality_preset": $QUALITY_PRESET,
+  "images": [
+$(echo "$manifest_entries" | paste -sd ",")
+  ]
+}
+EOF
 }
 
 # Main execution
 log "Starting image optimization pipeline"
 
-# Find and process images
-find "$SOURCE_DIR" -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o -iname "*.gif" \) | while read -r file; do
-    optimize_image "$file"
+check_dependencies
+
+# Find images to process
+find "$SOURCE_DIR" -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o -iname "*.gif" \) | while read -r image_file; do
+    optimize_image "$image_file"
 done
 
-generate_manifest
-invalidate_cdn
+update_manifest
 
-log "Image optimization pipeline completed"
-log "Check $LOG_FILE for details"
+log "Image optimization completed. Manifest: $MANIFEST_FILE"
+
+# Optional: Invalidate CDN cache
+if [ -n "${CDN_INVALIDATION_URL:-}" ]; then
+    log "Invalidating CDN cache..."
+    curl -X POST "$CDN_INVALIDATION_URL" \
+         -H "Content-Type: application/json" \
+         -d "{\"paths\":[\"/images/*\"]}" \
+         >/dev/null 2>&1 || true
+fi
+
+exit 0
