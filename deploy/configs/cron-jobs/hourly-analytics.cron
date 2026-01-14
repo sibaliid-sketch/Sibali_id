@@ -1,0 +1,14 @@
+# Hourly Analytics Cron Job
+# Scheduled hourly analytics processing and reporting
+
+# Run analytics aggregation every hour at minute 15
+15 * * * * www-data /usr/bin/php /var/www/sibali/artisan analytics:aggregate-hourly >> /var/log/sibali/analytics-hourly.log 2>&1
+
+# Process user engagement metrics every hour at minute 30
+30 * * * * www-data /usr/bin/php /var/www/sibali/artisan engagement:process-metrics >> /var/log/sibali/engagement-metrics.log 2>&1
+
+# Generate hourly performance reports every hour at minute 45
+45 * * * * www-data /usr/bin/php /var/www/sibali/artisan reports:generate-hourly >> /var/log/sibali/reports-hourly.log 2>&1
+
+# Clean up old analytics data (run once per hour)
+0 * * * * www-data /usr/bin/php /var/www/sibali/artisan analytics:cleanup --hours=24 >> /var/log/sibali/analytics-cleanup.log 2>&1

@@ -1,0 +1,36 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::create('system_settings', function (Blueprint $table) {
+            $table->id();
+            $table->string('key', 100)->unique();
+            $table->json('value');
+            $table->string('env_scope', 20)->default('global')->comment('global, local, staging, production');
+            $table->boolean('editable_flag')->default(true);
+            $table->string('category', 50)->nullable();
+            $table->text('description')->nullable();
+            $table->timestamp('updated_at')->useCurrent()->useCurrentOnUpdate();
+
+            $table->index('env_scope');
+            $table->index('category');
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        Schema::dropIfExists('system_settings');
+    }
+};

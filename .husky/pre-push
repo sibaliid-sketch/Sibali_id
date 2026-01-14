@@ -1,0 +1,21 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# Run unit smoke tests
+./vendor/bin/phpunit --testsuite=Unit --no-coverage --stop-on-failure
+
+# Run static analysis quick check
+./vendor/bin/phpstan analyse --memory-limit=256M --error-format=compact --no-progress
+
+# Run ESLint check
+npm run lint
+
+# Check for database migrations
+if [ -n "$(find database/migrations -name "*.php" -newer HEAD~1)" ]; then
+  echo "New migrations detected. Please ensure they are tested."
+fi
+
+# Check for environment file changes
+if [ -n "$(git diff --name-only HEAD~1 | grep .env)" ]; then
+  echo "Environment file changes detected. Please verify sensitive data is not committed."
+fi

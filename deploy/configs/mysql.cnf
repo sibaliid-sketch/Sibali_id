@@ -1,0 +1,60 @@
+# MySQL tuning config for production deployment
+# Performance & replication settings optimized for OLTP workloads
+
+[mysqld]
+# Basic settings
+bind-address = 127.0.0.1
+port = 3306
+socket = /var/run/mysqld/mysqld.sock
+
+# InnoDB settings
+innodb_buffer_pool_size = 1G
+innodb_log_file_size = 256M
+innodb_log_buffer_size = 16M
+innodb_flush_log_at_trx_commit = 1
+innodb_flush_method = O_DIRECT
+innodb_thread_concurrency = 8
+
+# Connection settings
+max_connections = 200
+max_connect_errors = 100000
+wait_timeout = 28800
+interactive_timeout = 28800
+
+# Query cache (disabled for InnoDB heavy workloads)
+query_cache_size = 0
+query_cache_type = 0
+
+# MyISAM settings (if needed)
+key_buffer_size = 16M
+table_open_cache = 4000
+
+# Logging
+slow_query_log = 1
+slow_query_log_file = /var/log/mysql/mysql-slow.log
+long_query_time = 2
+
+# Replication (if master)
+server_id = 1
+log_bin = /var/log/mysql/mysql-bin.log
+binlog_format = ROW
+sync_binlog = 1
+expire_logs_days = 7
+
+# Security
+skip_name_resolve
+sql_mode = STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION
+
+# Temporary tables
+tmp_table_size = 128M
+max_heap_table_size = 128M
+
+# Other optimizations
+table_definition_cache = 400
+open_files_limit = 65536
+
+[mysql]
+default-character-set = utf8mb4
+
+[client]
+default-character-set = utf8mb4

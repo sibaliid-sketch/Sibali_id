@@ -1,0 +1,17 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# Run PHP CS Fixer
+./vendor/bin/php-cs-fixer fix --dry-run --diff
+
+# Run ESLint and fix
+npm run lint:fix
+
+# Run fast unit tests
+./vendor/bin/phpunit --testsuite=Unit --no-coverage
+
+# Check for PHP syntax errors
+find app -name "*.php" -exec php -l {} \;
+
+# Check for JavaScript/TypeScript syntax errors
+npx tsc --noEmit --skipLibCheck

@@ -1,0 +1,15 @@
+- [ ] Create config/email-templates.php for email template registry
+- [ ] Create config/security.php for centralized security policy
+- [ ] Create config/storage.php for storage strategy & lifecycle rules
+- [ ] Create config/captcha.php for CAPTCHA & bot protection config
+- [ ] Create config/optimization.php for performance tuning & optimization flags
+- [ ] Create config/mobile.php for mobile & PWA settings
+- [ ] Create config/digital_marketing.php for marketing automation & content rules
+- [ ] Create config/business_development.php for B2B logic & contract rules
+- [ ] Create config/engagement.php for engagement tracking & retention thresholds
+- [ ] Create config/gamification.php for gamification rules & catalogs
+- [ ] Create config/social_media.php for social media connectors & policies
+- [ ] Create config/content_management.php for CMS rules & moderation
+- [ ] Create config/qris.php for QRIS payment integration parameters
+- [ ] Update TODO.md to mark all as completed
+- [ ] Check and update Notes.md if necessary

@@ -1,0 +1,10 @@
+# Daily backup cron job
+# Runs at 3:00 AM daily for database and file backups
+
+0 3 * * * www-data /usr/bin/php /var/www/sibali.id/artisan backup:database >> /var/log/cron/daily-backup.log 2>&1
+
+# File backup at 3:30 AM
+30 3 * * * www-data /usr/bin/php /var/www/sibali.id/artisan backup:files --storage >> /var/log/cron/daily-backup.log 2>&1
+
+# Health check after backup
+35 3 * * * www-data curl -f http://localhost/health/backup >> /var/log/cron/health-check.log 2>&1

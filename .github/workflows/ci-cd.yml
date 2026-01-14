@@ -1,0 +1,201 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: [8.1, 8.2, 8.3]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: ${{ matrix.php }}
+        extensions: pdo, pdo_mysql, mbstring, intl, zip, bcmath
+        tools: composer:v2
+
+    - name: Cache Composer dependencies
+      uses: actions/cache@v3
+      with:
+        path: vendor
+        key: ${{ runner.os }}-php-${{ matrix.php }}-composer-${{ hashFiles('**/composer.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-php-${{ matrix.php }}-composer-
+
+    - name: Install PHP dependencies
+      run: composer install --no-progress --prefer-dist --optimize-autoloader
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Install Node.js dependencies
+      run: npm ci
+
+    - name: Copy environment file
+      run: cp .env.example .env
+
+    - name: Generate application key
+      run: php artisan key:generate
+
+    - name: Run database migrations
+      run: php artisan migrate --force
+
+    - name: Run PHPUnit tests
+      run: vendor/bin/phpunit
+
+    - name: Run ESLint
+      run: npm run lint
+
+    - name: Build assets
+      run: npm run build
+
+    - name: Run PHPStan static analysis
+      run: vendor/bin/phpstan analyse --error-format=github
+
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run Composer audit
+      run: composer audit --format json
+
+    - name: Run npm audit
+      run: npm audit --audit-level moderate
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: [test, security-scan]
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: 8.2
+        extensions: pdo, pdo_mysql, mbstring, intl, zip, bcmath
+        tools: composer:v2
+
+    - name: Install PHP dependencies
+      run: composer install --no-progress --prefer-dist --optimize-autoloader --no-dev
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Install Node.js dependencies
+      run: npm ci
+
+    - name: Build assets
+      run: npm run build
+
+    - name: Build Docker image
+      run: docker build -t sibali-app:${{ github.sha }} .
+
+    - name: Push Docker image
+      run: |
+        echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
+        docker tag sibali-app:${{ github.sha }} ${{ secrets.DOCKER_REGISTRY }}/sibali-app:${{ github.sha }}
+        docker push ${{ secrets.DOCKER_REGISTRY }}/sibali-app:${{ github.sha }}
+
+    - name: Deploy to staging
+      run: |
+        ssh -o StrictHostKeyChecking=no ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }} << EOF
+          cd /var/www/sibali
+          docker pull ${{ secrets.DOCKER_REGISTRY }}/sibali-app:${{ github.sha }}
+          docker-compose -f docker-compose.yml -f docker-compose.staging.yml up -d --no-deps app
+          php artisan migrate --force
+          php artisan db:seed --force
+        EOF
+
+  deploy-production:
+    runs-on: ubuntu-latest
+    needs: [test, security-scan]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: production
+    concurrency: production
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: 8.2
+        extensions: pdo, pdo_mysql, mbstring, intl, zip, bcmath
+        tools: composer:v2
+
+    - name: Install PHP dependencies
+      run: composer install --no-progress --prefer-dist --optimize-autoloader --no-dev
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Install Node.js dependencies
+      run: npm ci
+
+    - name: Build assets
+      run: npm run build
+
+    - name: Build Docker image
+      run: docker build -t sibali-app:${{ github.sha }} .
+
+    - name: Push Docker image
+      run: |
+        echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
+        docker tag sibali-app:${{ github.sha }} ${{ secrets.DOCKER_REGISTRY }}/sibali-app:${{ github.sha }}
+        docker push ${{ secrets.DOCKER_REGISTRY }}/sibali-app:${{ github.sha }}
+
+    - name: Wait for manual approval
+      run: echo "Waiting for manual approval..."
+
+    - name: Deploy to production
+      run: |
+        ssh -o StrictHostKeyChecking=no ${{ secrets.PRODUCTION_USER }}@${{ secrets.PRODUCTION_HOST }} << EOF
+          cd /var/www/sibali
+          docker pull ${{ secrets.DOCKER_REGISTRY }}/sibali-app:${{ github.sha }}
+          docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d --no-deps app
+          php artisan migrate --force
+          php artisan config:cache
+          php artisan route:cache
+          php artisan view:cache
+        EOF

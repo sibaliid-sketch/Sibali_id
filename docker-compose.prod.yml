@@ -1,0 +1,290 @@
+version: "3.8"
+
+services:
+  nginx:
+    image: registry.sibali.id/sibali-nginx:${TAG:-latest}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/ssl:/etc/nginx/ssl:ro
+      - app_storage:/var/www/html/storage:ro
+    secrets:
+      - nginx_ssl_cert
+      - nginx_ssl_key
+    depends_on:
+      - php
+    networks:
+      - public_net
+      - internal_net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: gelf
+      options:
+        gelf-address: "udp://graylog.sibali.id:12201"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  php:
+    image: registry.sibali.id/sibali-app:${TAG:-latest}
+    volumes:
+      - app_storage:/var/www/html/storage
+    secrets:
+      - app_key
+      - db_password
+      - redis_password
+      - mail_password
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - internal_net
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: gelf
+      options:
+        gelf-address: "udp://graylog.sibali.id:12201"
+    healthcheck:
+      test: ["CMD", "php-fpm", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  worker:
+    image: registry.sibali.id/sibali-app:${TAG:-latest}
+    command: php artisan queue:work --sleep=3 --tries=3 --max-jobs=1000
+    volumes:
+      - app_storage:/var/www/html/storage
+    secrets:
+      - app_key
+      - db_password
+      - redis_password
+    depends_on:
+      - php
+      - mysql
+      - redis
+    networks:
+      - internal_net
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+    logging:
+      driver: gelf
+      options:
+        gelf-address: "udp://graylog.sibali.id:12201"
+
+  scheduler:
+    image: registry.sibali.id/sibali-app:${TAG:-latest}
+    command: /bin/sh -c "while true; do php artisan schedule:run --verbose --no-interaction; sleep 60; done"
+    volumes:
+      - app_storage:/var/www/html/storage
+    secrets:
+      - app_key
+      - db_password
+      - redis_password
+    depends_on:
+      - php
+      - mysql
+      - redis
+    networks:
+      - internal_net
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    logging:
+      driver: gelf
+      options:
+        gelf-address: "udp://graylog.sibali.id:12201"
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/db_root_password
+      MYSQL_DATABASE: ${DB_DATABASE:-sibali}
+      MYSQL_USER: ${DB_USERNAME:-sibali}
+      MYSQL_PASSWORD_FILE: /run/secrets/db_password
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./docker/mysql/backup.sh:/usr/local/bin/backup.sh:ro
+    secrets:
+      - db_root_password
+      - db_password
+    networks:
+      - internal_net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    logging:
+      driver: gelf
+      options:
+        gelf-address: "udp://graylog.sibali.id:12201"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    secrets:
+      - redis_password
+    networks:
+      - internal_net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: gelf
+      options:
+        gelf-address: "udp://graylog.sibali.id:12201"
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  migrate:
+    image: registry.sibali.id/sibali-app:${TAG:-latest}
+    command: php artisan migrate --force
+    volumes:
+      - app_storage:/var/www/html/storage
+    secrets:
+      - app_key
+      - db_password
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - internal_net
+    profiles:
+      - migrate
+    logging:
+      driver: gelf
+      options:
+        gelf-address: "udp://graylog.sibali.id:12201"
+
+  backup:
+    image: registry.sibali.id/sibali-app:${TAG:-latest}
+    command: /usr/local/bin/backup.sh
+    volumes:
+      - mysql_data:/var/lib/mysql:ro
+      - backup_data:/backup
+    secrets:
+      - db_password
+      - backup_s3_key
+    depends_on:
+      - mysql
+    networks:
+      - internal_net
+    profiles:
+      - backup
+    logging:
+      driver: gelf
+      options:
+        gelf-address: "udp://graylog.sibali.id:12201"
+
+volumes:
+  mysql_data:
+    driver: local
+  redis_data:
+    driver: local
+  app_storage:
+    driver: local
+  backup_data:
+    driver: local
+
+networks:
+  public_net:
+    driver: bridge
+  internal_net:
+    driver: bridge
+    internal: true
+
+secrets:
+  nginx_ssl_cert:
+    external: true
+  nginx_ssl_key:
+    external: true
+  app_key:
+    external: true
+  db_root_password:
+    external: true
+  db_password:
+    external: true
+  redis_password:
+    external: true
+  mail_password:
+    external: true
+  backup_s3_key:
+    external: true

@@ -1,0 +1,121 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    - cron: '0 2 * * 1'  # Weekly on Monday at 2 AM
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: 8.2
+        extensions: pdo, pdo_mysql, mbstring, intl, zip, bcmath
+        tools: composer:v2
+
+    - name: Install PHP dependencies
+      run: composer install --no-progress --prefer-dist --optimize-autoloader
+
+    - name: Run Composer audit
+      run: composer audit --format json
+
+    - name: Run npm audit
+      run: npm audit --audit-level moderate
+
+    - name: Run Trivy filesystem scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-fs-results.sarif'
+
+    - name: Upload Trivy filesystem scan results
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-fs-results.sarif'
+
+    - name: Run Trivy config scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'config'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-config-results.sarif'
+
+    - name: Upload Trivy config scan results
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-config-results.sarif'
+
+    - name: Run SonarQube scan
+      uses: sonarsource/sonarqube-scan-action@v2
+      env:
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+      with:
+        args: >
+          -Dsonar.projectKey=sibali-id
+          -Dsonar.sources=app,resources,config
+          -Dsonar.tests=tests
+          -Dsonar.php.coverage.reportPaths=coverage.xml
+          -Dsonar.exclusions=vendor/**,node_modules/**,storage/**,bootstrap/cache/**
+
+    - name: Run Snyk SCA
+      uses: snyk/actions/php@master
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      with:
+        args: --file=composer.lock
+
+    - name: Run Snyk for JavaScript
+      uses: snyk/actions/node@master
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      with:
+        args: --file=package.json
+
+    - name: Setup OWASP ZAP
+      run: |
+        wget https://github.com/zaproxy/zaproxy/releases/download/v2.14.0/ZAP_2.14.0_Linux.tar.gz
+        tar -xzf ZAP_2.14.0_Linux.tar.gz
+        echo "ZAP_HOME=$PWD/ZAP_2.14.0" >> $GITHUB_ENV
+
+    - name: Run DAST with OWASP ZAP
+      run: |
+        cd $ZAP_HOME
+        ./zap.sh -cmd -autorun /tmp/zap_script.zap
+      env:
+        ZAP_API_KEY: ${{ secrets.ZAP_API_KEY }}
+        TARGET_URL: ${{ secrets.STAGING_URL }}
+
+    - name: Upload ZAP scan results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: zap-scan-results
+        path: |
+          $ZAP_HOME/reports/
+
+    - name: Fail build on high-severity findings
+      run: |
+        # Check for high-severity vulnerabilities
+        if [ -f trivy-fs-results.sarif ]; then
+          high_count=$(jq '.runs[0].results | length' trivy-fs-results.sarif)
+          if [ "$high_count" -gt 0 ]; then
+            echo "High-severity vulnerabilities found. Failing build."
+            exit 1
+          fi
+        fi

@@ -1,0 +1,13 @@
+# Every 15 minutes queue monitor cron job
+# Monitors queue health and performance
+
+*/15 * * * * www-data /usr/bin/php /var/www/sibali.id/artisan queue:monitor >> /var/log/cron/queue-monitor.log 2>&1
+
+# Queue size check
+*/15 * * * * www-data /usr/bin/php /var/www/sibali.id/artisan queue:size >> /var/log/cron/queue-monitor.log 2>&1
+
+# Failed jobs check
+*/15 * * * * www-data /usr/bin/php /var/www/sibali.id/artisan queue:failed >> /var/log/cron/queue-monitor.log 2>&1
+
+# Health check for queue system
+*/15 * * * * www-data curl -f http://localhost/health/queue >> /var/log/cron/health-check.log 2>&1

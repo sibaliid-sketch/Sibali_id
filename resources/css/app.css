@@ -1,0 +1,140 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    body {
+        @apply font-sans antialiased;
+    }
+}
+
+@layer components {
+
+    /* Buttons */
+    .btn-primary {
+        @apply bg-sibali-blue text-white px-6 py-2 rounded-lg hover:bg-sibali-maroon transition font-semibold;
+    }
+
+    .btn-secondary {
+        @apply border-2 border-sibali-blue text-sibali-blue px-6 py-2 rounded-lg hover:bg-sibali-blue hover:text-white transition font-semibold;
+    }
+
+    .btn-danger {
+        @apply bg-sibali-red text-white px-6 py-2 rounded-lg hover:bg-sibali-maroon transition font-semibold;
+    }
+
+    /* Cards */
+    .card {
+        @apply bg-white rounded-lg shadow-lg overflow-hidden;
+    }
+
+    .card-header {
+        @apply p-6 border-b border-gray-200;
+    }
+
+    .card-body {
+        @apply p-6;
+    }
+
+    /* Forms */
+    .form-input {
+        @apply w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-sibali-blue focus:border-transparent;
+    }
+
+    .form-label {
+        @apply block text-sm font-medium text-gray-700 mb-1;
+    }
+
+    /* Navigation */
+    .nav-link {
+        @apply text-gray-700 hover:text-sibali-blue transition;
+    }
+
+    .nav-link-active {
+        @apply text-sibali-blue font-semibold;
+    }
+
+    /* Badges */
+    .badge {
+        @apply px-2 py-1 text-xs font-semibold rounded-full;
+    }
+
+    .badge-success {
+        @apply bg-green-100 text-green-800;
+    }
+
+    .badge-warning {
+        @apply bg-yellow-100 text-yellow-800;
+    }
+
+    .badge-danger {
+        @apply bg-red-100 text-red-800;
+    }
+
+    .badge-info {
+        @apply bg-blue-100 text-blue-800;
+    }
+
+    /* Alerts */
+    .alert {
+        @apply p-4 rounded-lg mb-4;
+    }
+
+    .alert-success {
+        @apply bg-green-50 text-green-800 border border-green-200;
+    }
+
+    .alert-error {
+        @apply bg-red-50 text-red-800 border border-red-200;
+    }
+
+    .alert-warning {
+        @apply bg-yellow-50 text-yellow-800 border border-yellow-200;
+    }
+
+    .alert-info {
+        @apply bg-blue-50 text-blue-800 border border-blue-200;
+    }
+}
+
+@layer utilities {
+    .text-sibali-blue {
+        color: #00008B;
+    }
+
+    .text-sibali-red {
+        color: #8B0000;
+    }
+
+    .text-sibali-maroon {
+        color: #800000;
+    }
+
+    .text-sibali-sky {
+        color: #87CEEB;
+    }
+
+    .bg-sibali-blue {
+        background-color: #00008B;
+    }
+
+    .bg-sibali-red {
+        background-color: #8B0000;
+    }
+
+    .bg-sibali-maroon {
+        background-color: #800000;
+    }
+
+    .bg-sibali-sky {
+        background-color: #87CEEB;
+    }
+
+    .border-sibali-blue {
+        border-color: #00008B;
+    }
+
+    .border-sibali-red {
+        border-color: #8B0000;
+    }
+}

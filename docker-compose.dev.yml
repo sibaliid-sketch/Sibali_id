@@ -1,0 +1,181 @@
+version: "3.8"
+
+services:
+  nginx:
+    image: nginx:1.25-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./docker/nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/nginx/sites-enabled:/etc/nginx/sites-enabled:ro
+      - .:/var/www/html:delegated
+      - ./storage/app/public:/var/www/html/storage/app/public:ro
+      - app_storage:/var/www/html/storage
+    depends_on:
+      - php
+    networks:
+      - sibali_net
+    restart: unless-stopped
+
+  php:
+    build:
+      context: .
+      dockerfile: ./docker/php/Dockerfile.dev
+    ports:
+      - "9000:9000"
+    volumes:
+      - .:/var/www/html:delegated
+      - vendor_cache:/var/www/html/vendor
+      - app_storage:/var/www/html/storage
+    environment:
+      - XDEBUG_MODE=develop,debug
+      - XDEBUG_CLIENT_HOST=host.docker.internal
+      - XDEBUG_CLIENT_PORT=9003
+      - APP_DEBUG=true
+      - APP_ENV=local
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - sibali_net
+    restart: unless-stopped
+
+  vite:
+    image: node:18-alpine
+    working_dir: /app
+    ports:
+      - "5173:5173"
+    volumes:
+      - .:/app:delegated
+      - node_modules_cache:/app/node_modules
+    command: npm run dev -- --host 0.0.0.0
+    environment:
+      - NODE_ENV=development
+    networks:
+      - sibali_net
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: ./docker/php/Dockerfile.dev
+    command: php artisan queue:work --sleep=3 --tries=3 --max-jobs=1000
+    volumes:
+      - .:/var/www/html:delegated
+      - vendor_cache:/var/www/html/vendor
+      - app_storage:/var/www/html/storage
+    depends_on:
+      - php
+      - mysql
+      - redis
+    networks:
+      - sibali_net
+    restart: unless-stopped
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: ./docker/php/Dockerfile.dev
+    command: /bin/sh -c "while true; do php artisan schedule:run --verbose --no-interaction; sleep 60; done"
+    volumes:
+      - .:/var/www/html:delegated
+      - vendor_cache:/var/www/html/vendor
+      - app_storage:/var/www/html/storage
+    depends_on:
+      - php
+      - mysql
+      - redis
+    networks:
+      - sibali_net
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.0
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-root}
+      MYSQL_DATABASE: ${DB_DATABASE:-sibali}
+      MYSQL_USER: ${DB_USERNAME:-sibali}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-password}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./docker/mysql/init-dev.sql:/docker-entrypoint-initdb.d/init-dev.sql:ro
+    networks:
+      - sibali_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - sibali_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    environment:
+      - MH_STORAGE=maildir
+    volumes:
+      - mailhog_data:/maildir
+    networks:
+      - sibali_net
+    restart: unless-stopped
+
+  adminer:
+    image: adminer:latest
+    ports:
+      - "8081:8080"
+    depends_on:
+      - mysql
+    networks:
+      - sibali_net
+    restart: unless-stopped
+
+  seeder:
+    build:
+      context: .
+      dockerfile: ./docker/php/Dockerfile.dev
+    command: /bin/sh -c "php artisan migrate && php artisan db:seed"
+    volumes:
+      - .:/var/www/html:delegated
+      - vendor_cache:/var/www/html/vendor
+      - app_storage:/var/www/html/storage
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - sibali_net
+    profiles:
+      - seed
+
+volumes:
+  mysql_data:
+  redis_data:
+  app_storage:
+  vendor_cache:
+  node_modules_cache:
+  mailhog_data:
+
+networks:
+  sibali_net:
+    driver: bridge

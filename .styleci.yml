@@ -1,0 +1,32 @@
+preset: laravel
+psr12: true
+finder:
+  exclude:
+    - "vendor"
+    - "node_modules"
+    - "storage"
+    - "bootstrap/cache"
+  name:
+    - "*.php"
+  not-name:
+    - "*Test.php"
+    - "*test.php"
+risky: false
+enabled:
+  - array_syntax
+  - ordered_imports
+  - phpdoc_align
+  - phpdoc_indent
+  - phpdoc_no_empty_return
+  - phpdoc_order
+  - phpdoc_scalar
+  - phpdoc_separation
+  - phpdoc_summary
+  - phpdoc_to_comment
+  - phpdoc_trim
+  - phpdoc_types
+  - phpdoc_var_without_name
+  - single_quote
+disabled:
+  - phpdoc_no_package
+  - phpdoc_var_without_name
