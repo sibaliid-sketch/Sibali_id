@@ -23,7 +23,7 @@
 
                 <!-- Identifier Field -->
                 <div>
-                    <label for="identifier" class="sr-only">Email, Username, atau Nomor Telepon</label>
+                    <label for="identifier" name="identifier" class="sr-only">Email, Username, atau Nomor Telepon</label>
                     <input id="identifier" name="identifier" type="text" autocomplete="username" required
                         class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
                         placeholder="Email, Username, atau Nomor Telepon" value="{{ old('identifier') }}">
@@ -43,8 +43,16 @@
                     @enderror
                 </div>
 
-                <!-- 2FA OTP Field (hidden initially) -->
+                <!-- 2FA QR and OTP Field (hidden initially) -->
                 <div id="otpField" class="hidden">
+                    @if (isset($qrCode))
+                        <div class="text-center mb-4">
+                            <p class="text-gray-600 mb-2">Scan QR code dengan kamera ponsel Anda untuk mendapatkan kode
+                                verifikasi:</p>
+                            <img src="data:image/svg+xml;base64,{{ base64_encode($qrCode) }}" alt="QR Code"
+                                class="mx-auto border border-gray-300 rounded">
+                        </div>
+                    @endif
                     <label for="otp" class="sr-only">Kode 2FA</label>
                     <input id="otp" name="otp" type="text" autocomplete="one-time-code"
                         class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
@@ -72,7 +80,8 @@
                     </div>
 
                     <div class="text-sm">
-                        <a href="{{ route('password.request') }}" class="font-medium text-indigo-600 hover:text-indigo-500">
+                        <a href="{{ route('password.request') }}"
+                            class="font-medium text-indigo-600 hover:text-indigo-500">
                             Lupa password?
                         </a>
                     </div>

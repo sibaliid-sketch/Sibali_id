@@ -36,5 +36,8 @@ class DatabaseSeeder extends Seeder
 
         // Create additional random users
         \App\Models\User::factory(10)->create();
+
+        // Enable 2FA for test users
+        $this->call(TwoFactorSeeder::class);
     }
 }

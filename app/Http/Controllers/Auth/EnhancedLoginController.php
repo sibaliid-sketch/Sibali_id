@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Services\Auth\DeviceFingerprintingService;
 use App\Services\Auth\RiskAssessmentService;
+use App\Services\Security\TwoFactorAuthService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
@@ -18,18 +19,27 @@ class EnhancedLoginController extends Controller
 
     protected $riskService;
 
+    protected $twoFactorService;
+
     public function __construct(
         DeviceFingerprintingService $deviceService,
-        RiskAssessmentService $riskService
+        RiskAssessmentService $riskService,
+        TwoFactorAuthService $twoFactorService
     ) {
         $this->deviceService = $deviceService;
         $this->riskService = $riskService;
+        $this->twoFactorService = $twoFactorService;
         $this->middleware('guest')->except('logout');
     }
 
     public function showLoginForm()
     {
-        return view('auth.enhanced-login');
+        $qr = null;
+        if (session()->has('2fa_qr')) {
+            $qr = $this->twoFactorService->getLoginQR();
+        }
+
+        return view('auth.enhanced-login', compact('qr'));
     }
 
     public function login(Request $request)
@@ -97,6 +107,9 @@ class EnhancedLoginController extends Controller
 
             // Clear rate limiter
             RateLimiter::clear($this->throttleKey($request));
+
+            // Clear 2FA session
+            session()->forget(['2fa_login_hash', '2fa_login_expires', '2fa_qr']);
 
             // Log successful login
             \activity('enhanced_login', 'user', $user->id, [
@@ -191,16 +204,12 @@ class EnhancedLoginController extends Controller
 
     protected function sendTwoFactorCode($user)
     {
-        // Implementation would send SMS/email with 2FA code
-        // For now, just log
-        Log::info('2FA code sent to user', ['user_id' => $user->id]);
+        $this->twoFactorService->sendLoginCode();
     }
 
     protected function verifyTwoFactorCode($user, $code)
     {
-        // Implementation would verify the 2FA code
-        // For now, accept any 6-digit code
-        return strlen($code) === 6 && is_numeric($code);
+        return $this->twoFactorService->verify($user, $code);
     }
 
     protected function validateCaptcha($captchaResponse)

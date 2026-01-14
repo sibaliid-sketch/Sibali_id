@@ -608,6 +608,54 @@ This section provides comprehensive guidance for setting up and testing the Siba
    - Staff users redirect to departmental dashboards
    - Customers redirect to appropriate CRM/LMS dashboards
 
+#### Two-Factor Authentication (2FA) Testing
+
+**Where to Find 2FA for Local Testing:**
+
+1. **Login Process (Enhanced Login)**:
+   - **File**: `app/Http/Controllers/Auth/EnhancedLoginController.php`
+   - **URL**: `http://localhost:8000/login`
+   - **Trigger Conditions**:
+     - Always required for admin users (`user_type = 'admin'`)
+     - Required for high-risk logins (risk score > 0.8)
+     - Required for unknown devices
+   - **Testing**: Enter any 6-digit number (e.g., "123456") as the 2FA code for local testing
+
+2. **2FA Management**:
+   - **Controller**: `app/Http/Controllers/Auth/TwoFactorAuthController.php`
+   - **Setup URL**: `/two-factor/setup` (requires authentication)
+   - **Verify URL**: `/two-factor/verify` (API endpoint)
+   - **Recovery Codes**: `/two-factor/recovery-codes`
+   - **Disable**: `/two-factor/disable`
+
+3. **Database Fields**:
+   - **Migration**: `database/migrations/2014_10_12_000000_create_users_table.php`
+   - **Fields**:
+     - `two_factor_secret` (string, nullable)
+     - `two_factor_recovery_codes` (text, nullable)
+     - `two_factor_confirmed_at` (timestamp, nullable)
+
+4. **Configuration Files**:
+   - **Security Config**: `config/security.php` - Multi-factor authentication settings
+   - **Internal Tools**: `config/internal-tools.php` - 2FA enforcement for internal tools
+   - **Firewall Layer**: `app/Security/FirewallLayers/Layer10_TwoFactorAuth.php` - 2FA firewall layer
+
+5. **Frontend Views**:
+   - **Login Form**: `resources/views/auth/enhanced-login.blade.php` - Contains 2FA OTP input field
+   - **Setup Form**: `resources/views/auth/two-factor/setup.blade.php`
+   - **Recovery Codes**: `resources/views/auth/two-factor/recovery-codes.blade.php`
+
+6. **Services**:
+   - **TwoFactorAuthService**: Referenced in controllers but service file may not exist yet
+   - **Device Fingerprinting**: `app/Services/Auth/DeviceFingerprintingService.php`
+   - **Risk Assessment**: `app/Services/Auth/RiskAssessmentService.php`
+
+**Local Testing Notes:**
+- For local development, the 2FA verification accepts any 6-digit code
+- Admin accounts always require 2FA on login
+- 2FA is enforced for internal tools access (configurable via `INTERNAL_TOOLS_ENFORCE_2FA`)
+- Session stores 2FA verification status in `session('2fa_verified')`
+
 #### Feature Testing URLs
 
 ##### Landing Page
@@ -1014,3 +1062,25 @@ Below is a comprehensive list of all files and directories in the workspace, org
 ### database/migrations/ Directory (Additional Migrations)
 - **database/migrations/2024_01_01_000028_create_user_devices_table.php**: Create user devices table. Purpose: Store device fingerprints and trust data. Function: Migration for user_devices table. Interconnected with: UserDevice model.
 - **database/migrations/2024_01_01_000029_create_user_social_accounts_table.php**: Create user social accounts table. Purpose: Store social login provider data. Function: Migration for user_social_accounts table. Interconnected with: UserSocialAccount model.
+
+
+#### 2FA Database Seeding
+
+**Automatic 2FA Setup for Testing:**
+- **Seeder**: \database/seeders/TwoFactorSeeder.php\ - Automatically enables 2FA for admin and teacher users
+- **Service**: \pp/Services/Security/TwoFactorAuthService.php\ - Handles 2FA operations
+- **Standard Test Secret**: \JBSWY3DPEHPK3PXP\ (used for admin@test.com)
+- **Test Code**: Any 6-digit number (e.g., \
+123456\) works in local environment
+
+**Running the Seeder:**
+\\\ash
+php artisan db:seed --class=TwoFactorSeeder
+# or run all seeders
+php artisan db:seed
+\\\
+
+**Test Accounts with 2FA Enabled:**
+- admin@test.com (Admin User) - Always requires 2FA
+- teacher@test.com (Teacher User) - Has 2FA enabled
+- Additional admin/teacher users created by factory - Have 2FA enabled

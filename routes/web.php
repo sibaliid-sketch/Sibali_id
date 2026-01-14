@@ -6,6 +6,7 @@ use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\RegisterController;
 use App\Http\Controllers\Auth\ResetPasswordController;
 use App\Http\Controllers\Auth\RoleRedirectController;
+use App\Http\Controllers\Auth\TwoFactorAuthController;
 use App\Http\Controllers\Admin\UserManagementController;
 use App\Http\Controllers\Dashboard\AdminDashboardController;
 use App\Http\Controllers\Dashboard\ParentDashboardController;
@@ -57,6 +58,16 @@ Route::post('/logout', [LoginController::class, 'logout'])->name('logout')->midd
 
 // Post-login redirect
 Route::middleware('auth')->get('/redirect', [RoleRedirectController::class, 'redirect'])->name('auth.redirect');
+
+// Two-Factor Authentication Routes
+Route::middleware('auth')->prefix('2fa')->name('2fa.')->group(function () {
+    Route::get('/setup', [TwoFactorAuthController::class, 'showSetupForm'])->name('setup');
+    Route::post('/setup', [TwoFactorAuthController::class, 'setup'])->name('setup.post');
+    Route::post('/verify', [TwoFactorAuthController::class, 'verify'])->name('verify');
+    Route::post('/disable', [TwoFactorAuthController::class, 'disable'])->name('disable');
+    Route::get('/recovery-codes', [TwoFactorAuthController::class, 'showRecoveryCodes'])->name('recovery-codes');
+    Route::post('/recovery-codes/regenerate', [TwoFactorAuthController::class, 'regenerateRecoveryCodes'])->name('recovery-codes.regenerate');
+});
 
 // LMS Dashboard Routes (Protected)
 Route::middleware(['auth'])->prefix('lms')->name('lms.')->group(function () {

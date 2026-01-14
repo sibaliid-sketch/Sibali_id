@@ -75,6 +75,6 @@ class Layer10_TwoFactorAuth
 
     protected function has2FAEnabled($user): bool
     {
-        return isset($user->two_factor_secret) && ! empty($user->two_factor_secret);
+        return !empty($user->two_factor_confirmed_at);
     }
 }

@@ -25,9 +25,9 @@ class TwoFactorAuthController extends Controller
             return redirect()->route('profile')->with('info', '2FA sudah diaktifkan');
         }
 
-        $qrCode = $this->twoFactorService->generateQRCode($user);
+        $qrData = $this->twoFactorService->generateQRCode($user);
 
-        return view('auth.two-factor.setup', compact('qrCode'));
+        return view('auth.two-factor.setup', ['qrCode' => $qrData['qr']]);
     }
 
     public function setup(Request $request)
