@@ -1,15 +1,17 @@
-- [ ] Create config/email-templates.php for email template registry
-- [ ] Create config/security.php for centralized security policy
-- [ ] Create config/storage.php for storage strategy & lifecycle rules
-- [ ] Create config/captcha.php for CAPTCHA & bot protection config
-- [ ] Create config/optimization.php for performance tuning & optimization flags
-- [ ] Create config/mobile.php for mobile & PWA settings
-- [ ] Create config/digital_marketing.php for marketing automation & content rules
-- [ ] Create config/business_development.php for B2B logic & contract rules
-- [ ] Create config/engagement.php for engagement tracking & retention thresholds
-- [ ] Create config/gamification.php for gamification rules & catalogs
-- [ ] Create config/social_media.php for social media connectors & policies
-- [ ] Create config/content_management.php for CMS rules & moderation
-- [ ] Create config/qris.php for QRIS payment integration parameters
-- [ ] Update TODO.md to mark all as completed
-- [ ] Check and update Notes.md if necessary
+- [x] Analyze the SQL error: Column 'active' not found in services table
+- [x] Read services table migration: has 'active_flag', missing 'featured', 'sort_order', 'slug'
+- [x] Create migration to add missing columns: featured, sort_order, slug
+- [x] Run migration
+- [x] Update HomeController to use 'active_flag' instead of 'active' in getFeaturedPrograms, programs, programDetail
+- [x] Clear application cache to ensure changes take effect
+- [x] Test the application to verify the error is resolved (server started without errors, columns added)
+- [x] Fix testimonials table missing error: create testimonials table migration with required columns
+- [x] Run testimonials migration
+- [x] Clear cache again
+- [x] Fix contents table missing 'type' column error: add 'type' column to contents table
+- [x] Update HomeController and view to use 'publish_at' instead of 'published_at'
+- [x] Run type migration
+- [x] Clear cache
+- [x] Rollback and re-run the type migration to ensure column is added
+- [x] Verify column exists using tinker
+- [x] Clear all caches (cache, config, route, view)

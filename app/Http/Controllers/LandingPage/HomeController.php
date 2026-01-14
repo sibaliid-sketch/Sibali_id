@@ -37,7 +37,7 @@ class HomeController extends Controller
     protected function getFeaturedPrograms()
     {
         return DB::table('services')
-            ->where('active', true)
+            ->where('active_flag', true)
             ->where('featured', true)
             ->orderBy('sort_order', 'asc')
             ->limit(6)
@@ -59,9 +59,9 @@ class HomeController extends Controller
         return DB::table('contents')
             ->where('status', 'published')
             ->where('type', 'blog')
-            ->whereNotNull('published_at')
-            ->where('published_at', '<=', now())
-            ->orderBy('published_at', 'desc')
+            ->whereNotNull('publish_at')
+            ->where('publish_at', '<=', now())
+            ->orderBy('publish_at', 'desc')
             ->limit(3)
             ->get();
     }
@@ -80,7 +80,7 @@ class HomeController extends Controller
     public function programs()
     {
         $programs = DB::table('services')
-            ->where('active', true)
+            ->where('active_flag', true)
             ->orderBy('sort_order', 'asc')
             ->paginate(12);
 
@@ -91,7 +91,7 @@ class HomeController extends Controller
     {
         $program = DB::table('services')
             ->where('slug', $slug)
-            ->where('active', true)
+            ->where('active_flag', true)
             ->first();
 
         if (! $program) {
