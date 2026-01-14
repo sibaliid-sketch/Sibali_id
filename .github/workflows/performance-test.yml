@@ -1,0 +1,226 @@
+name: Performance Test
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'Target URL for testing'
+        required: false
+        default: 'https://staging.sibali.id'
+      test_duration:
+        description: 'Test duration in seconds'
+        required: false
+        default: '60'
+
+env:
+  K6_DURATION: ${{ github.event.inputs.test_duration || '60' }}
+  K6_VUS: 10
+  TARGET_URL: ${{ github.event.inputs.target_url || secrets.STAGING_URL }}
+
+jobs:
+  performance-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+
+    - name: Install K6
+      run: |
+        curl https://github.com/grafana/k6/releases/latest/download/k6-v0.45.0-linux-amd64.tar.gz -L | tar xvz
+        sudo mv k6-v0.45.0-linux-amd64/k6 /usr/local/bin/k6
+        rm -rf k6-v0.45.0-linux-amd64
+
+    - name: Create K6 test script
+      run: |
+        cat > performance-test.js << 'EOF'
+        import http from 'k6/http';
+        import { check, sleep } from 'k6';
+        import { Rate, Trend } from 'k6/metrics';
+
+        // Custom metrics
+        let errorRate = new Rate('errors');
+        let responseTime = new Trend('response_time');
+
+        export let options = {
+          vus: __ENV.K6_VUS || 10,
+          duration: __ENV.K6_DURATION + 's',
+          thresholds: {
+            http_req_duration: ['p(95)<500'],
+            http_req_failed: ['rate<0.1'],
+            errors: ['rate<0.1'],
+          },
+        };
+
+        const BASE_URL = __ENV.TARGET_URL || 'http://localhost:8000';
+
+        export default function () {
+          // Test homepage
+          let response = http.get(BASE_URL + '/');
+          check(response, {
+            'homepage status is 200': (r) => r.status === 200,
+            'homepage response time < 500ms': (r) => r.timings.duration < 500,
+          });
+          errorRate.add(response.status !== 200);
+          responseTime.add(response.timings.duration);
+
+          sleep(1);
+
+          // Test login page
+          response = http.get(BASE_URL + '/login');
+          check(response, {
+            'login page status is 200': (r) => r.status === 200,
+            'login page response time < 300ms': (r) => r.timings.duration < 300,
+          });
+          errorRate.add(response.status !== 200);
+          responseTime.add(response.timings.duration);
+
+          sleep(1);
+
+          // Test API endpoint (if available)
+          response = http.get(BASE_URL + '/api/health');
+          if (response.status !== 404) {
+            check(response, {
+              'API health status is 200': (r) => r.status === 200,
+              'API response time < 200ms': (r) => r.timings.duration < 200,
+            });
+            errorRate.add(response.status !== 200);
+            responseTime.add(response.timings.duration);
+          }
+
+          sleep(1);
+        }
+
+        export function handleSummary(data) {
+          return {
+            'stdout': textSummary(data, { indent: ' ', enableColors: false }),
+            'performance-results.json': JSON.stringify(data, null, 2),
+          };
+        }
+        EOF
+
+    - name: Run K6 performance test
+      run: |
+        k6 run \
+          --env K6_VUS=$K6_VUS \
+          --env K6_DURATION=$K6_DURATION \
+          --env TARGET_URL=$TARGET_URL \
+          performance-test.js
+
+    - name: Upload performance results
+      uses: actions/upload-artifact@v3
+      with:
+        name: performance-results
+        path: |
+          performance-results.json
+          performance-test.js
+
+    - name: Check performance thresholds
+      run: |
+        # Parse results and check against thresholds
+        if [ -f performance-results.json ]; then
+          # Extract key metrics
+          P95_RESPONSE_TIME=$(jq '.metrics.http_req_duration.values."p(95)"' performance-results.json 2>/dev/null || echo "0")
+          ERROR_RATE=$(jq '.metrics.http_req_failed.values.rate' performance-results.json 2>/dev/null || echo "0")
+
+          echo "P95 Response Time: $P95_RESPONSE_TIME ms"
+          echo "Error Rate: $ERROR_RATE"
+
+          # Check thresholds
+          THRESHOLD_BREACHED=false
+
+          if (( $(echo "$P95_RESPONSE_TIME > 500" | bc -l 2>/dev/null || echo "0") )); then
+            echo "❌ P95 response time threshold breached: $P95_RESPONSE_TIME > 500ms"
+            THRESHOLD_BREACHED=true
+          fi
+
+          if (( $(echo "$ERROR_RATE > 0.1" | bc -l 2>/dev/null || echo "0") )); then
+            echo "❌ Error rate threshold breached: $ERROR_RATE > 10%"
+            THRESHOLD_BREACHED=true
+          fi
+
+          if [ "$THRESHOLD_BREACHED" = "true" ]; then
+            echo "threshold_breached=true" >> $GITHUB_ENV
+          fi
+        fi
+
+    - name: Compare with baseline
+      run: |
+        # Download baseline from previous successful run
+        if [ -f baseline-performance.json ]; then
+          BASELINE_P95=$(jq '.metrics.http_req_duration.values."p(95)"' baseline-performance.json 2>/dev/null || echo "0")
+          CURRENT_P95=$P95_RESPONSE_TIME
+
+          REGRESSION=$(echo "scale=2; ($CURRENT_P95 - $BASELINE_P95) / $BASELINE_P95 * 100" | bc -l 2>/dev/null || echo "0")
+
+          echo "Performance regression: $REGRESSION%"
+
+          if (( $(echo "$REGRESSION > 20" | bc -l 2>/dev/null || echo "0") )); then
+            echo "❌ Performance regression > 20%: $REGRESSION%"
+            echo "regression_detected=true" >> $GITHUB_ENV
+          fi
+        fi
+
+    - name: Update baseline
+      if: github.ref == 'refs/heads/main' && !env.threshold_breached && !env.regression_detected
+      run: |
+        cp performance-results.json baseline-performance.json
+
+    - name: Send Slack notification
+      if: env.threshold_breached == 'true' || env.regression_detected == 'true'
+      run: |
+        MESSAGE="🚨 Performance Issues Detected in ${{ github.repository }}"
+        if [ "${{ env.threshold_breached }}" = "true" ]; then
+          MESSAGE="$MESSAGE\n- Performance thresholds breached"
+        fi
+        if [ "${{ env.regression_detected }}" = "true" ]; then
+          MESSAGE="$MESSAGE\n- Performance regression detected: ${{ env.REGRESSION }}%"
+        fi
+
+        curl -X POST ${{ secrets.SLACK_WEBHOOK }} \
+             -H 'Content-type: application/json' \
+             -d "{\"text\":\"$MESSAGE\",\"attachments\":[{\"text\":\"Check the performance test results for details.\"}]}"
+
+    - name: Comment on PR
+      if: github.event_name == 'pull_request' && (env.threshold_breached == 'true' || env.regression_detected == 'true')
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const thresholdBreached = process.env.threshold_breached === 'true';
+          const regressionDetected = process.env.regression_detected === 'true';
+
+          let comment = '## 🚨 Performance Test Results\n\n';
+
+          if (thresholdBreached) {
+            comment += '❌ **Performance thresholds breached**\n';
+            comment += '- Response time or error rate exceeded acceptable limits\n';
+          }
+
+          if (regressionDetected) {
+            comment += '❌ **Performance regression detected**\n';
+            comment += `- Performance degraded by ${process.env.REGRESSION}%\n`;
+          }
+
+          comment += '\n📊 [View detailed results](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})\n';
+          comment += '\nPlease review and optimize performance before merging.';
+
+          github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+            body: comment
+          });
+
+    - name: Fail on performance issues
+      if: env.threshold_breached == 'true' || env.regression_detected == 'true'
+      run: |
+        echo "Performance test failed due to threshold breaches or regression"
+        exit 1

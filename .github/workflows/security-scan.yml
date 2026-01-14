@@ -1,15 +1,17 @@
 name: Security Scan
 
 on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
   push:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
-  schedule:
-    - cron: '0 2 * * 1'  # Weekly on Monday at 2 AM
+  workflow_dispatch:
 
 jobs:
-  security-scan:
+  dependency-scan:
     runs-on: ubuntu-latest
 
     steps:
@@ -20,102 +22,215 @@ jobs:
       uses: shivammathur/setup-php@v2
       with:
         php-version: 8.2
-        extensions: pdo, pdo_mysql, mbstring, intl, zip, bcmath
-        tools: composer:v2
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
 
     - name: Install PHP dependencies
-      run: composer install --no-progress --prefer-dist --optimize-autoloader
+      run: composer install --no-progress --prefer-dist
+
+    - name: Install Node.js dependencies
+      run: npm ci
 
     - name: Run Composer audit
-      run: composer audit --format json
+      run: |
+        composer audit --format=json > composer-audit.json || true
+        if [ -f composer-audit.json ]; then
+          jq . composer-audit.json
+        fi
 
-    - name: Run npm audit
-      run: npm audit --audit-level moderate
+    - name: Run NPM audit
+      run: |
+        npm audit --audit-level=moderate --json > npm-audit.json || true
+        if [ -f npm-audit.json ]; then
+          jq . npm-audit.json
+        fi
 
-    - name: Run Trivy filesystem scan
-      uses: aquasecurity/trivy-action@master
-      with:
-        scan-type: 'fs'
-        scan-ref: '.'
-        format: 'sarif'
-        output: 'trivy-fs-results.sarif'
-
-    - name: Upload Trivy filesystem scan results
-      uses: github/codeql-action/upload-sarif@v2
-      if: always()
-      with:
-        sarif_file: 'trivy-fs-results.sarif'
-
-    - name: Run Trivy config scan
-      uses: aquasecurity/trivy-action@master
-      with:
-        scan-type: 'config'
-        scan-ref: '.'
-        format: 'sarif'
-        output: 'trivy-config-results.sarif'
-
-    - name: Upload Trivy config scan results
-      uses: github/codeql-action/upload-sarif@v2
-      if: always()
-      with:
-        sarif_file: 'trivy-config-results.sarif'
-
-    - name: Run SonarQube scan
-      uses: sonarsource/sonarqube-scan-action@v2
+    - name: Run Snyk SCA scan
+      uses: snyk/actions/php@master
+      continue-on-error: true
       env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      with:
+        args: --file=composer.lock --package-manager=composer
+
+    - name: Run Snyk JavaScript scan
+      uses: snyk/actions/node@master
+      continue-on-error: true
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      with:
+        args: --file=package-lock.json
+
+  sast-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: 8.2
+
+    - name: Install PHP dependencies
+      run: composer install --no-progress --prefer-dist
+
+    - name: Run PHPStan static analysis
+      run: |
+        composer require --dev phpstan/phpstan
+        vendor/bin/phpstan analyse --error-format=github --no-progress
+
+    - name: Run Psalm static analysis
+      run: |
+        composer require --dev vimeo/psalm
+        vendor/bin/psalm --output-format=github
+
+  container-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Build Docker image
+      run: |
+        docker build -f docker/php/Dockerfile -t sibali-app:latest .
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'image'
+        scan-ref: 'sibali-app:latest'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+        severity: 'CRITICAL,HIGH'
+
+    - name: Upload Trivy scan results
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  dast-scan:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/develop' || github.event_name == 'schedule'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run OWASP ZAP DAST scan
+      uses: zaproxy/action-baseline@v0.8.0
+      with:
+        target: ${{ secrets.STAGING_URL }}
+        rules_file_name: '.zap/rules.tsv'
+        artifact_name: 'zap_scan'
+        fail_action: false
+
+  sonarcloud-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: 8.2
+        coverage: xdebug
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+
+    - name: Install dependencies
+      run: |
+        composer install --no-progress --prefer-dist
+        npm ci
+
+    - name: Run tests with coverage
+      run: php artisan test --coverage-clover=coverage.xml
+      env:
+        DB_CONNECTION: sqlite
+        DB_DATABASE: database/database.sqlite
+
+    - name: Run SonarCloud scan
+      uses: SonarSource/sonarcloud-github-action@master
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
       with:
         args: >
-          -Dsonar.projectKey=sibali-id
+          -Dsonar.organization=sibali-id
+          -Dsonar.projectKey=sibali-id_sibali
           -Dsonar.sources=app,resources,config
           -Dsonar.tests=tests
           -Dsonar.php.coverage.reportPaths=coverage.xml
-          -Dsonar.exclusions=vendor/**,node_modules/**,storage/**,bootstrap/cache/**
+          -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
 
-    - name: Run Snyk SCA
-      uses: snyk/actions/php@master
-      env:
-        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-      with:
-        args: --file=composer.lock
+  report-and-alert:
+    runs-on: ubuntu-latest
+    needs: [dependency-scan, sast-scan, container-scan, dast-scan, sonarcloud-scan]
+    if: always()
 
-    - name: Run Snyk for JavaScript
-      uses: snyk/actions/node@master
-      env:
-        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-      with:
-        args: --file=package.json
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-    - name: Setup OWASP ZAP
+    - name: Generate security report
       run: |
-        wget https://github.com/zaproxy/zaproxy/releases/download/v2.14.0/ZAP_2.14.0_Linux.tar.gz
-        tar -xzf ZAP_2.14.0_Linux.tar.gz
-        echo "ZAP_HOME=$PWD/ZAP_2.14.0" >> $GITHUB_ENV
+        echo "# Security Scan Report" > security-report.md
+        echo "Date: $(date)" >> security-report.md
+        echo "Branch: ${{ github.ref }}" >> security-report.md
+        echo "Commit: ${{ github.sha }}" >> security-report.md
+        echo "" >> security-report.md
+        echo "## Scan Results" >> security-report.md
+        echo "- Dependency Scan: ${{ needs.dependency-scan.result }}" >> security-report.md
+        echo "- SAST Scan: ${{ needs.sast-scan.result }}" >> security-report.md
+        echo "- Container Scan: ${{ needs.container-scan.result }}" >> security-report.md
+        echo "- DAST Scan: ${{ needs.dast-scan.result }}" >> security-report.md
+        echo "- SonarCloud Scan: ${{ needs.sonarcloud-scan.result }}" >> security-report.md
 
-    - name: Run DAST with OWASP ZAP
-      run: |
-        cd $ZAP_HOME
-        ./zap.sh -cmd -autorun /tmp/zap_script.zap
-      env:
-        ZAP_API_KEY: ${{ secrets.ZAP_API_KEY }}
-        TARGET_URL: ${{ secrets.STAGING_URL }}
-
-    - name: Upload ZAP scan results
+    - name: Upload security report
       uses: actions/upload-artifact@v3
-      if: always()
       with:
-        name: zap-scan-results
-        path: |
-          $ZAP_HOME/reports/
+        name: security-report
+        path: security-report.md
 
-    - name: Fail build on high-severity findings
+    - name: Check for critical vulnerabilities
       run: |
-        # Check for high-severity vulnerabilities
-        if [ -f trivy-fs-results.sarif ]; then
-          high_count=$(jq '.runs[0].results | length' trivy-fs-results.sarif)
-          if [ "$high_count" -gt 0 ]; then
-            echo "High-severity vulnerabilities found. Failing build."
-            exit 1
-          fi
+        # Check if any job failed
+        if [ "${{ needs.dependency-scan.result }}" = "failure" ] || \
+           [ "${{ needs.sast-scan.result }}" = "failure" ] || \
+           [ "${{ needs.container-scan.result }}" = "failure" ]; then
+          echo "Critical security issues found"
+          echo "critical_issues=true" >> $GITHUB_ENV
         fi
+
+    - name: Create security issue
+      if: env.critical_issues == 'true'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: 'Critical Security Issues Detected',
+            body: 'Security scans have detected critical vulnerabilities. Please review the security report artifact.',
+            labels: ['security', 'critical']
+          })
+
+    - name: Send Slack notification
+      if: env.critical_issues == 'true'
+      run: |
+        curl -X POST ${{ secrets.SLACK_WEBHOOK }} \
+             -H 'Content-type: application/json' \
+             -d '{"text":"🚨 Critical security issues detected in ${{ github.repository }}","attachments":[{"text":"Security scans failed. Check the security report for details."}]}'

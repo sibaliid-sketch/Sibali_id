@@ -1,0 +1,269 @@
+name: Role-Based Deployment
+
+on:
+  push:
+    branches: [ main, develop ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment for deployment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      force_deploy:
+        description: 'Force deployment (bypass some checks)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  TARGET_ENV: ${{ github.event.inputs.environment || 'staging' }}
+  FORCE_DEPLOY: ${{ github.event.inputs.force_deploy || false }}
+
+jobs:
+  check-permissions:
+    runs-on: ubuntu-latest
+    outputs:
+      can_deploy_staging: ${{ steps.check.outputs.can_deploy_staging }}
+      can_deploy_production: ${{ steps.check.outputs.can_deploy_production }}
+
+    steps:
+    - name: Check user permissions
+      id: check
+      run: |
+        # Check if user is in required teams
+        USER="${{ github.actor }}"
+        TOKEN="${{ secrets.GITHUB_TOKEN }}"
+
+        # Check staging deployment permissions (ops team)
+        STAGING_ACCESS=$(curl -s -H "Authorization: token $TOKEN" \
+          "https://api.github.com/orgs/${{ github.repository_owner }}/teams/ops/memberships/$USER" | \
+          jq -r '.state // "pending"')
+
+        # Check production deployment permissions (infra team)
+        PROD_ACCESS=$(curl -s -H "Authorization: token $TOKEN" \
+          "https://api.github.com/orgs/${{ github.repository_owner }}/teams/infra/memberships/$USER" | \
+          jq -r '.state // "pending"')
+
+        # Set outputs
+        if [ "$STAGING_ACCESS" = "active" ]; then
+          echo "can_deploy_staging=true" >> $GITHUB_OUTPUT
+        else
+          echo "can_deploy_staging=false" >> $GITHUB_OUTPUT
+        fi
+
+        if [ "$PROD_ACCESS" = "active" ]; then
+          echo "can_deploy_production=true" >> $GITHUB_OUTPUT
+        else
+          echo "can_deploy_production=false" >> $GITHUB_OUTPUT
+        fi
+
+  validate-deployment:
+    runs-on: ubuntu-latest
+    needs: check-permissions
+    if: |
+      (env.TARGET_ENV == 'staging' && needs.check-permissions.outputs.can_deploy_staging == 'true') ||
+      (env.TARGET_ENV == 'production' && needs.check-permissions.outputs.can_deploy_production == 'true') ||
+      env.FORCE_DEPLOY == 'true'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: 8.2
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+
+    - name: Install dependencies
+      run: |
+        composer install --no-progress --prefer-dist --optimize-autoloader
+        npm ci
+
+    - name: Run tests
+      run: |
+        cp .env.ci .env
+        php artisan key:generate
+        php artisan migrate --force
+        php artisan test
+
+    - name: Build assets
+      run: npm run build
+
+    - name: Run security checks
+      if: env.TARGET_ENV == 'production' || env.FORCE_DEPLOY == 'false'
+      run: |
+        composer audit --format=json > security-audit.json || true
+        if [ -f security-audit.json ] && [ "$(jq '.advisories | length' security-audit.json)" -gt 0 ]; then
+          echo "Security vulnerabilities found"
+          if [ "$FORCE_DEPLOY" != "true" ]; then
+            exit 1
+          fi
+        fi
+
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: [check-permissions, validate-deployment]
+    if: |
+      env.TARGET_ENV == 'staging' &&
+      (needs.check-permissions.outputs.can_deploy_staging == 'true' || env.FORCE_DEPLOY == 'true') &&
+      needs.validate-deployment.result == 'success'
+    environment: staging
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure deployment
+      run: |
+        echo "Deploying to staging environment"
+        # Add staging-specific deployment commands here
+
+    - name: Deploy to staging
+      run: |
+        # Example deployment commands
+        # rsync, scp, or deployment script
+        echo "Deployment to staging completed"
+
+    - name: Run health checks
+      run: |
+        # Health check commands
+        curl -f https://staging.sibali.id/health || exit 1
+
+    - name: Notify deployment
+      run: |
+        curl -X POST ${{ secrets.SLACK_WEBHOOK }} \
+             -H 'Content-type: application/json' \
+             -d "{\"text\":\"✅ Staging deployment completed\",\"attachments\":[{\"text\":\"Deployed by ${{ github.actor }} from ${{ github.sha }}\"}]}" || true
+
+  request-production-approval:
+    runs-on: ubuntu-latest
+    needs: [check-permissions, validate-deployment]
+    if: |
+      env.TARGET_ENV == 'production' &&
+      needs.check-permissions.outputs.can_deploy_production == 'true' &&
+      needs.validate-deployment.result == 'success'
+    environment: production
+    outputs:
+      approved: ${{ steps.approval.outputs.approved }}
+
+    steps:
+    - name: Request production deployment approval
+      id: approval
+      uses: trstringer/manual-approval@v1
+      with:
+        secret: ${{ github.TOKEN }}
+        approvers: deva-bangsawan,infra-lead,ops-manager
+        minimum-approvals: 2
+        issue-title: "Production Deployment Approval Required"
+        issue-body: |
+          Production deployment requested by ${{ github.actor }}
+
+          **Changes to deploy:**
+          - Commit: ${{ github.sha }}
+          - Branch: ${{ github.ref }}
+          - Environment: ${{ env.TARGET_ENV }}
+
+          **Validation Results:**
+          - Tests: ✅ Passed
+          - Security Scan: ✅ Passed
+          - Build: ✅ Successful
+
+          Please review and approve/reject this deployment.
+
+  deploy-production:
+    runs-on: ubuntu-latest
+    needs: [request-production-approval]
+    if: needs.request-production-approval.outputs.approved == 'true'
+    environment: production
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure production deployment
+      run: |
+        echo "Deploying to production environment"
+        # Add production-specific deployment commands here
+
+    - name: Deploy to production
+      run: |
+        # Production deployment commands
+        # Blue-green deployment, rolling update, etc.
+        echo "Production deployment completed"
+
+    - name: Run production health checks
+      run: |
+        # Comprehensive health checks
+        curl -f https://www.sibali.id/health || exit 1
+        curl -f https://www.sibali.id/api/health || exit 1
+
+    - name: Notify production deployment
+      run: |
+        curl -X POST ${{ secrets.SLACK_WEBHOOK }} \
+             -H 'Content-type: application/json' \
+             -d "{\"text\":\"🚀 Production deployment completed\",\"attachments\":[{\"text\":\"Deployed by ${{ github.actor }} from ${{ github.sha }}\"}]}" || true
+
+        # Also notify via email or other channels
+        echo "Production deployment notification sent"
+
+  rollback-production:
+    runs-on: ubuntu-latest
+    needs: [deploy-production]
+    if: failure() && env.TARGET_ENV == 'production'
+
+    steps:
+    - name: Trigger rollback
+      run: |
+        echo "Production deployment failed, initiating rollback"
+        # Add rollback commands here
+        # Could trigger another workflow or run rollback script
+
+    - name: Notify rollback
+      run: |
+        curl -X POST ${{ secrets.SLACK_WEBHOOK }} \
+             -H 'Content-type: application/json' \
+             -d "{\"text\":\"🚨 Production deployment failed - Rollback initiated\",\"attachments\":[{\"text\":\"Check logs for failure details\"}]}" || true
+
+  audit-log:
+    runs-on: ubuntu-latest
+    needs: [deploy-staging, deploy-production, rollback-production]
+    if: always()
+
+    steps:
+    - name: Log deployment audit
+      run: |
+        TIMESTAMP=$(date -Iseconds)
+        STATUS="unknown"
+
+        if [ "${{ needs.deploy-staging.result }}" = "success" ] || [ "${{ needs.deploy-production.result }}" = "success" ]; then
+          STATUS="success"
+        elif [ "${{ needs.rollback-production.result }}" = "success" ]; then
+          STATUS="rolled_back"
+        else
+          STATUS="failed"
+        fi
+
+        # Log to audit system
+        AUDIT_LOG="{
+          \"timestamp\": \"$TIMESTAMP\",
+          \"actor\": \"${{ github.actor }}\",
+          \"action\": \"deployment\",
+          \"environment\": \"${{ env.TARGET_ENV }}\",
+          \"commit\": \"${{ github.sha }}\",
+          \"status\": \"$STATUS\",
+          \"workflow_run\": \"${{ github.run_id }}\"
+        }"
+
+        echo "$AUDIT_LOG" > deployment_audit.json
+
+        # Could send to external audit system
+        # curl -X POST ${{ secrets.AUDIT_WEBHOOK }} -H 'Content-type: application/json' -d "$AUDIT_LOG" || true

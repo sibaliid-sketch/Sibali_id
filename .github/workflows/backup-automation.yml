@@ -2,12 +2,27 @@ name: Backup Automation
 
 on:
   schedule:
-    - cron: '0 2 * * *'  # Daily at 2 AM UTC
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
   workflow_dispatch:
+    inputs:
+      backup_type:
+        description: 'Type of backup to perform'
+        required: false
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - incremental
+          - both
+
+env:
+  BACKUP_TYPE: ${{ github.event.inputs.backup_type || 'full' }}
 
 jobs:
-  backup:
+  database-backup:
     runs-on: ubuntu-latest
+    if: ${{ env.BACKUP_TYPE == 'full' || env.BACKUP_TYPE == 'both' }}
 
     steps:
     - name: Checkout code
@@ -17,89 +32,206 @@ jobs:
       uses: shivammathur/setup-php@v2
       with:
         php-version: 8.2
-        extensions: pdo, pdo_mysql, mbstring, intl, zip, bcmath
-        tools: composer:v2
 
-    - name: Install PHP dependencies
-      run: composer install --no-progress --prefer-dist --optimize-autoloader --no-dev
+    - name: Install dependencies
+      run: composer install --no-dev --optimize-autoloader
 
-    - name: Generate SSH key for backup server
+    - name: Configure AWS CLI
       run: |
-        mkdir -p ~/.ssh
-        echo "${{ secrets.BACKUP_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-        chmod 600 ~/.ssh/id_rsa
-        ssh-keyscan -H ${{ secrets.BACKUP_HOST }} >> ~/.ssh/known_hosts
+        aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws configure set region ${{ secrets.AWS_REGION }}
 
     - name: Run database backup
       run: |
-        ssh -o StrictHostKeyChecking=no ${{ secrets.BACKUP_USER }}@${{ secrets.BACKUP_HOST }} << EOF
-          cd /opt/backup-scripts
-          ./backup-database.sh sibali-production
-        EOF
+        # Create backup directory
+        BACKUP_DIR="/tmp/backup_$(date +%Y%m%d_%H%M%S)"
+        mkdir -p "$BACKUP_DIR"
 
-    - name: Run storage backup
-      run: |
-        ssh -o StrictHostKeyChecking=no ${{ secrets.BACKUP_USER }}@${{ secrets.BACKUP_HOST }} << EOF
-          cd /opt/backup-scripts
-          ./backup-storage.sh sibali-production
-        EOF
+        # Run Laravel backup command or custom script
+        if [ -f "artisan" ]; then
+          php artisan backup:run --only-db
+        else
+          # Fallback to manual backup
+          mysqldump -h ${{ secrets.DB_HOST }} \
+                   -u ${{ secrets.DB_USERNAME }} \
+                   -p${{ secrets.DB_PASSWORD }} \
+                   ${{ secrets.DB_DATABASE }} > "$BACKUP_DIR/database.sql"
+        fi
 
-    - name: Encrypt backup files
-      run: |
-        ssh -o StrictHostKeyChecking=no ${{ secrets.BACKUP_USER }}@${{ secrets.BACKUP_HOST }} << EOF
-          cd /opt/backups
-          # Encrypt database backup
-          gpg --encrypt --recipient ${{ secrets.GPG_RECIPIENT }} --output sibali-db-$(date +%Y%m%d).sql.gz.enc sibali-db-$(date +%Y%m%d).sql.gz
-          # Encrypt storage backup
-          gpg --encrypt --recipient ${{ secrets.GPG_RECIPIENT }} --output sibali-storage-$(date +%Y%m%d).tar.gz.enc sibali-storage-$(date +%Y%m%d).tar.gz
-        EOF
+        # Compress backup
+        tar -czf "$BACKUP_DIR/database.tar.gz" -C "$BACKUP_DIR" database.sql
 
-    - name: Upload encrypted backups to S3
-      run: |
-        ssh -o StrictHostKeyChecking=no ${{ secrets.BACKUP_USER }}@${{ secrets.BACKUP_HOST }} << EOF
-          # Install AWS CLI if not present
-          if ! command -v aws &> /dev/null; then
-            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-            unzip awscliv2.zip
-            sudo ./aws/install
-          fi
+        # Encrypt backup
+        gpg --symmetric --batch --passphrase ${{ secrets.BACKUP_ENCRYPTION_KEY }} \
+            --output "$BACKUP_DIR/database.tar.gz.gpg" "$BACKUP_DIR/database.tar.gz"
 
-          # Configure AWS CLI
-          aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws configure set default.region ${{ secrets.AWS_REGION }}
+        # Generate checksum
+        sha256sum "$BACKUP_DIR/database.tar.gz.gpg" > "$BACKUP_DIR/database.sha256"
 
-          # Upload backups to S3
-          aws s3 cp /opt/backups/sibali-db-$(date +%Y%m%d).sql.gz.enc s3://${{ secrets.S3_BACKUP_BUCKET }}/database/ --storage-class STANDARD_IA
-          aws s3 cp /opt/backups/sibali-storage-$(date +%Y%m%d).tar.gz.enc s3://${{ secrets.S3_BACKUP_BUCKET }}/storage/ --storage-class STANDARD_IA
-        EOF
+        # Upload to S3
+        aws s3 cp "$BACKUP_DIR/database.tar.gz.gpg" \
+               "s3://${{ secrets.BACKUP_BUCKET }}/database/$(date +%Y/%m)/database_$(date +%Y%m%d_%H%M%S).tar.gz.gpg"
+        aws s3 cp "$BACKUP_DIR/database.sha256" \
+               "s3://${{ secrets.BACKUP_BUCKET }}/database/$(date +%Y/%m)/database_$(date +%Y%m%d_%H%M%S).sha256"
+
+        # Cleanup
+        rm -rf "$BACKUP_DIR"
 
     - name: Verify backup integrity
       run: |
-        ssh -o StrictHostKeyChecking=no ${{ secrets.BACKUP_USER }}@${{ secrets.BACKUP_HOST }} << EOF
-          # Verify checksums
-          cd /opt/backups
-          sha256sum sibali-db-$(date +%Y%m%d).sql.gz.enc > db-checksum.txt
-          sha256sum sibali-storage-$(date +%Y%m%d).tar.gz.enc > storage-checksum.txt
+        # Download and verify latest backup
+        LATEST_BACKUP=$(aws s3 ls s3://${{ secrets.BACKUP_BUCKET }}/database/$(date +%Y/%m)/ \
+                       --recursive | sort | tail -1 | awk '{print $4}')
 
-          # Upload checksums to S3
-          aws s3 cp db-checksum.txt s3://${{ secrets.S3_BACKUP_BUCKET }}/checksums/
-          aws s3 cp storage-checksum.txt s3://${{ secrets.S3_BACKUP_BUCKET }}/checksums/
-        EOF
+        if [ -n "$LATEST_BACKUP" ]; then
+          aws s3 cp "s3://${{ secrets.BACKUP_BUCKET }}/$LATEST_BACKUP" /tmp/verify_backup.gpg
+          aws s3 cp "s3://${{ secrets.BACKUP_BUCKET }}/${LATEST_BACKUP%.tar.gz.gpg}.sha256" /tmp/verify_backup.sha256
 
-    - name: Rotate old backups
+          # Verify checksum
+          if sha256sum -c /tmp/verify_backup.sha256; then
+            echo "✅ Backup integrity verified"
+          else
+            echo "❌ Backup integrity check failed"
+            exit 1
+          fi
+        fi
+
+  storage-backup:
+    runs-on: ubuntu-latest
+    if: ${{ env.BACKUP_TYPE == 'full' || env.BACKUP_TYPE == 'both' }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS CLI
       run: |
-        ssh -o StrictHostKeyChecking=no ${{ secrets.BACKUP_USER }}@${{ secrets.BACKUP_HOST }} << EOF
-          # Remove backups older than 30 days
-          find /opt/backups -name "*.enc" -mtime +30 -delete
-          find /opt/backups -name "*.gz" -mtime +30 -delete
+        aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws configure set region ${{ secrets.AWS_REGION }}
 
-          # Remove old S3 objects
-          aws s3api list-objects-v2 --bucket ${{ secrets.S3_BACKUP_BUCKET }} --prefix database/ --query 'Contents[?LastModified<`'"$(date -d '30 days ago' +%Y-%m-%d)"'`].Key' --output text | xargs -I {} aws s3 rm s3://${{ secrets.S3_BACKUP_BUCKET }}/{}
-          aws s3api list-objects-v2 --bucket ${{ secrets.S3_BACKUP_BUCKET }} --prefix storage/ --query 'Contents[?LastModified<`'"$(date -d '30 days ago' +%Y-%m-%d)"'`].Key' --output text | xargs -I {} aws s3 rm s3://${{ secrets.S3_BACKUP_BUCKET }}/{}
-        EOF
-
-    - name: Send backup notification
-      if: always()
+    - name: Run storage backup
       run: |
-        curl -X POST -H 'Content-type: application/json' --data '{"text":"Backup completed for Sibali.id - Status: '"${{ job.status }}"'"}' ${{ secrets.SLACK_WEBHOOK_URL }}
+        # Create backup directory
+        BACKUP_DIR="/tmp/storage_backup_$(date +%Y%m%d_%H%M%S)"
+        mkdir -p "$BACKUP_DIR"
+
+        # Sync storage directory to backup location
+        aws s3 sync s3://${{ secrets.STORAGE_BUCKET }}/ "$BACKUP_DIR/storage/" \
+                   --exclude "*" --include "uploads/*" --include "files/*"
+
+        # Compress storage backup
+        tar -czf "$BACKUP_DIR/storage.tar.gz" -C "$BACKUP_DIR" storage/
+
+        # Encrypt backup
+        gpg --symmetric --batch --passphrase ${{ secrets.BACKUP_ENCRYPTION_KEY }} \
+            --output "$BACKUP_DIR/storage.tar.gz.gpg" "$BACKUP_DIR/storage.tar.gz"
+
+        # Generate checksum
+        sha256sum "$BACKUP_DIR/storage.tar.gz.gpg" > "$BACKUP_DIR/storage.sha256"
+
+        # Upload to S3
+        aws s3 cp "$BACKUP_DIR/storage.tar.gz.gpg" \
+               "s3://${{ secrets.BACKUP_BUCKET }}/storage/$(date +%Y/%m)/storage_$(date +%Y%m%d_%H%M%S).tar.gz.gpg"
+        aws s3 cp "$BACKUP_DIR/storage.sha256" \
+               "s3://${{ secrets.BACKUP_BUCKET }}/storage/$(date +%Y/%m)/storage_$(date +%Y%m%d_%H%M%S).sha256"
+
+        # Cleanup
+        rm -rf "$BACKUP_DIR"
+
+  incremental-backup:
+    runs-on: ubuntu-latest
+    if: ${{ env.BACKUP_TYPE == 'incremental' || env.BACKUP_TYPE == 'both' }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS CLI
+      run: |
+        aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws configure set region ${{ secrets.AWS_REGION }}
+
+    - name: Run incremental backup
+      run: |
+        # Run the incremental backup script
+        chmod +x .scripts/backup/incremental-backup.sh
+        .scripts/backup/incremental-backup.sh
+
+  cleanup-old-backups:
+    runs-on: ubuntu-latest
+    needs: [database-backup, storage-backup, incremental-backup]
+    if: always()
+
+    steps:
+    - name: Configure AWS CLI
+      run: |
+        aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws configure set region ${{ secrets.AWS_REGION }}
+
+    - name: Cleanup old backups
+      run: |
+        # Keep last 30 days of daily backups
+        aws s3 ls s3://${{ secrets.BACKUP_BUCKET }}/database/ --recursive | \
+        awk '$1 < "'$(date -d '30 days ago' +%Y-%m-%d)'" {print $4}' | \
+        xargs -I {} aws s3 rm s3://${{ secrets.BACKUP_BUCKET }}/{} || true
+
+        aws s3 ls s3://${{ secrets.BACKUP_BUCKET }}/storage/ --recursive | \
+        awk '$1 < "'$(date -d '30 days ago' +%Y-%m-%d)'" {print $4}' | \
+        xargs -I {} aws s3 rm s3://${{ secrets.BACKUP_BUCKET }}/{} || true
+
+        # Keep last 7 days of incremental backups
+        aws s3 ls s3://${{ secrets.BACKUP_BUCKET }}/incremental/ --recursive | \
+        awk '$1 < "'$(date -d '7 days ago' +%Y-%m-%d)'" {print $4}' | \
+        xargs -I {} aws s3 rm s3://${{ secrets.BACKUP_BUCKET }}/{} || true
+
+  notify-backup-status:
+    runs-on: ubuntu-latest
+    needs: [database-backup, storage-backup, incremental-backup, cleanup-old-backups]
+    if: always()
+
+    steps:
+    - name: Send backup status notification
+      run: |
+        # Determine overall status
+        if [ "${{ needs.database-backup.result }}" = "success" ] && \
+           [ "${{ needs.storage-backup.result }}" = "success" ] && \
+           [ "${{ needs.incremental-backup.result }}" = "success" ]; then
+          STATUS="✅ SUCCESS"
+          MESSAGE="All backup operations completed successfully"
+        else
+          STATUS="❌ FAILED"
+          MESSAGE="Some backup operations failed. Check logs for details."
+        fi
+
+        # Send notification
+        curl -X POST ${{ secrets.SLACK_WEBHOOK }} \
+             -H 'Content-type: application/json' \
+             -d "{
+               \"text\":\"Backup Status: $STATUS\",
+               \"attachments\":[{
+                 \"text\":\"$MESSAGE\",
+                 \"fields\":[
+                   {\"title\":\"Database Backup\",\"value\":\"${{ needs.database-backup.result }}\",\"short\":true},
+                   {\"title\":\"Storage Backup\",\"value\":\"${{ needs.storage-backup.result }}\",\"short\":true},
+                   {\"title\":\"Incremental Backup\",\"value\":\"${{ needs.incremental-backup.result }}\",\"short\":true},
+                   {\"title\":\"Cleanup\",\"value\":\"${{ needs.cleanup-old-backups.result }}\",\"short\":true}
+                 ]
+               }]
+             }" || true
+
+    - name: Create issue on failure
+      if: failure()
+      uses: actions/github-script@v6
+      with:
+        script: |
+          github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: 'Backup Automation Failed',
+            body: 'Automated backup process failed. Please check the workflow logs and investigate.',
+            labels: ['backup', 'critical', 'automation']
+          });

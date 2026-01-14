@@ -2,76 +2,94 @@
 Brief description of the changes made in this PR.
 
 ## Related Issues
-- Closes #ISSUE_NUMBER
-- Related to #ISSUE_NUMBER
+Link to related issues or tickets:
+- Closes #
+- Related to #
 
 ## Type of Change
 - [ ] Bug fix (non-breaking change which fixes an issue)
 - [ ] New feature (non-breaking change which adds functionality)
 - [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
 - [ ] Documentation update
-- [ ] Code refactoring
 - [ ] Performance improvement
 - [ ] Security enhancement
+- [ ] Code refactoring
+- [ ] Testing improvement
 
 ## Checklist
-- [ ] My code follows the project's coding standards
-- [ ] I have performed a self-review of my own code
-- [ ] I have commented my code, particularly in hard-to-understand areas
-- [ ] I have made corresponding changes to the documentation
-- [ ] My changes generate no new warnings or errors
-- [ ] I have added tests that prove my fix is effective or that my feature works
-- [ ] New and existing unit tests pass locally with my changes
-- [ ] Any dependent changes have been merged and published in downstream modules
-- [ ] I have tested the changes in staging environment
-- [ ] I have updated the changelog (if applicable)
-- [ ] I have checked for security implications of my changes
-- [ ] The PR size is reasonable and focused on a single concern
-- [ ] I have added appropriate labels to this PR
+- [ ] **Description**: I have provided a clear and concise description of the changes.
+- [ ] **Related Issues**: I have linked to any related issues or tickets.
+- [ ] **Tests**: I have added or updated tests to cover the changes.
+  - [ ] Unit tests pass
+  - [ ] Feature tests pass
+  - [ ] Integration tests pass
+- [ ] **Code Quality**:
+  - [ ] PHPStan static analysis passes (level 8)
+  - [ ] ESLint passes with no errors
+  - [ ] Code follows PSR-12 standards
+  - [ ] No new PHP warnings or notices
+- [ ] **Linting**: All linting checks pass
+- [ ] **Migrations**: If database changes are included:
+  - [ ] Migration files are properly named and structured
+  - [ ] Rollback functionality is implemented
+  - [ ] Migration has been tested on a copy of production data
+- [ ] **Changelog**: I have updated the CHANGELOG.md file with the changes
+- [ ] **Documentation**: I have updated relevant documentation
+- [ ] **Security**: I have considered security implications of the changes
+  - [ ] No sensitive data exposure
+  - [ ] Input validation and sanitization
+  - [ ] Authentication/authorization checks
+  - [ ] SQL injection prevention
+  - [ ] XSS prevention
+- [ ] **Performance**: I have considered performance implications
+  - [ ] No N+1 queries
+  - [ ] Efficient database queries
+  - [ ] Caching implemented where appropriate
+  - [ ] No memory leaks
+- [ ] **Accessibility**: Changes maintain or improve accessibility
+- [ ] **Browser Compatibility**: Tested on supported browsers
+- [ ] **Mobile Responsiveness**: Changes work on mobile devices
+- [ ] **Backwards Compatibility**: Changes are backwards compatible
+- [ ] **Dependencies**: No unnecessary new dependencies added
+- [ ] **Environment Variables**: New environment variables are documented
+- [ ] **Deployment**: Changes are deployment-ready
+  - [ ] Configuration is environment-aware
+  - [ ] Feature flags implemented for gradual rollout if needed
+  - [ ] Rollback plan documented
 
-## Testing
-### Test Environment
-- [ ] Local development
-- [ ] Staging environment
-- [ ] Production-like environment
+## Testing Instructions
+Steps to test the changes:
 
-### Test Cases Covered
-- [ ] Unit tests
-- [ ] Integration tests
-- [ ] End-to-end tests
-- [ ] Manual testing
+1. Step 1
+2. Step 2
+3. Expected results
 
-### Test Results
-Describe the test results and any relevant screenshots or logs.
-
-## Security Considerations
-- [ ] No sensitive data is exposed
-- [ ] Authentication and authorization are properly implemented
-- [ ] Input validation is in place
-- [ ] SQL injection prevention measures are applied
-- [ ] XSS prevention measures are applied
-- [ ] CSRF protection is enabled where applicable
-
-## Performance Impact
-- [ ] No performance degradation expected
-- [ ] Performance improvements included
-- [ ] Database queries are optimized
-- [ ] Caching is implemented where appropriate
-
-## Migration Notes
-If this PR includes database migrations:
-- [ ] Migration is backward compatible
-- [ ] Rollback plan is documented
-- [ ] Data migration strategy is defined
-- [ ] Migration has been tested on staging
+## Screenshots (if applicable)
+Add screenshots to help explain the changes.
 
 ## Additional Notes
-Any additional information or context that reviewers should be aware of.
+Any additional information or context about the changes.
 
 ## Reviewer Checklist
-- [ ] Code quality meets standards
-- [ ] Tests are comprehensive and passing
-- [ ] Security considerations are addressed
-- [ ] Performance impact is acceptable
-- [ ] Documentation is updated
-- [ ] Migration notes are clear (if applicable)
+- [ ] Code is well-structured and follows project conventions
+- [ ] Tests are comprehensive and pass
+- [ ] Security considerations have been addressed
+- [ ] Performance impact has been considered
+- [ ] Documentation has been updated
+- [ ] Migration scripts are safe and tested
+- [ ] No breaking changes without proper communication
+- [ ] Deployment and rollback procedures are clear
+
+## Deployment Notes
+Special deployment considerations or steps required.
+
+## Rollback Plan
+Steps to rollback if issues are discovered after deployment.
+
+---
+
+**By submitting this pull request, I confirm that:**
+- [ ] My code follows the project's coding standards
+- [ ] I have tested my changes thoroughly
+- [ ] I have considered security, performance, and accessibility implications
+- [ ] I am ready for this code to be reviewed and merged
