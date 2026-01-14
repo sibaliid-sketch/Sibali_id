@@ -7,6 +7,7 @@ use App\Services\Auth\DeviceFingerprintingService;
 use App\Services\Auth\RiskAssessmentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -98,7 +99,7 @@ class EnhancedLoginController extends Controller
             RateLimiter::clear($this->throttleKey($request));
 
             // Log successful login
-            activity('enhanced_login', 'user', $user->id, [
+            \activity('enhanced_login', 'user', $user->id, [
                 'ip' => $request->ip(),
                 'user_agent' => $request->userAgent(),
                 'device_fingerprint' => $deviceFingerprint,
@@ -121,7 +122,7 @@ class EnhancedLoginController extends Controller
     public function logout(Request $request)
     {
         if (auth()->check()) {
-            activity('enhanced_logout', 'user', auth()->id());
+            \activity('enhanced_logout', 'user', auth()->id());
         }
 
         Auth::logout();
@@ -192,7 +193,7 @@ class EnhancedLoginController extends Controller
     {
         // Implementation would send SMS/email with 2FA code
         // For now, just log
-        \Log::info('2FA code sent to user', ['user_id' => $user->id]);
+        Log::info('2FA code sent to user', ['user_id' => $user->id]);
     }
 
     protected function verifyTwoFactorCode($user, $code)

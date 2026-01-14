@@ -13,6 +13,15 @@ class UserManagementController extends Controller
         $search = $request->input('search');
         $role = $request->input('role');
 
+        // For web requests, return view
+        if (!$request->expectsJson()) {
+            return view('dashboard.admin.users', [
+                'users' => [], // TODO: fetch users
+                'search' => $search,
+                'role' => $role,
+            ]);
+        }
+
         return response()->json(['data' => []]);
     }
 

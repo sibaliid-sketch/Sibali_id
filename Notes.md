@@ -240,10 +240,17 @@ The internal tools are organized by the following departments:
 - **Package Manager**: Composer (PHP), npm (Node.js)
 
 ## Environment Setup
-- **Operating System**: Windows 11 (based on system info)
+- **Operating System**: Windows 11
 - **Default Shell**: C:\WINDOWS\system32\cmd.exe
 - **Home Directory**: C:/Users/Deva Bangsawan
 - **Current Working Directory**: c:/laragon/www/Sibali.id
+- **Local Development Server**: Laragon (Apache/Nginx, MySQL, PHP)
+- **Version Control**: Git
+- **IDE**: VS Code with extensions for PHP, Vue, Laravel
+- **Package Managers**: Composer (PHP), npm (Node.js)
+- **Build Tools**: Vite for frontend assets
+- **Testing**: PHPUnit for backend, Vitest for frontend
+- **Code Quality**: ESLint, Prettier, PHP CS Fixer, Laravel Pint
 
 ## Production Environment
 - **Hosting Provider**: Hostinger (www.hostinger.com)

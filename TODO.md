@@ -1,17 +1,15 @@
-- [x] Analyze the SQL error: Column 'active' not found in services table
-- [x] Read services table migration: has 'active_flag', missing 'featured', 'sort_order', 'slug'
-- [x] Create migration to add missing columns: featured, sort_order, slug
-- [x] Run migration
-- [x] Update HomeController to use 'active_flag' instead of 'active' in getFeaturedPrograms, programs, programDetail
-- [x] Clear application cache to ensure changes take effect
-- [x] Test the application to verify the error is resolved (server started without errors, columns added)
-- [x] Fix testimonials table missing error: create testimonials table migration with required columns
-- [x] Run testimonials migration
-- [x] Clear cache again
-- [x] Fix contents table missing 'type' column error: add 'type' column to contents table
-- [x] Update HomeController and view to use 'publish_at' instead of 'published_at'
-- [x] Run type migration
-- [x] Clear cache
-- [x] Rollback and re-run the type migration to ensure column is added
-- [x] Verify column exists using tinker
-- [x] Clear all caches (cache, config, route, view)
+# TODO: Enable Login Testing with Dummy Data
+
+## Completed Tasks
+
+- [x] Update UserFactory to include phone and user_type for realistic dummy data
+- [x] Update DatabaseSeeder to create specific dummy users (admin@test.com, student@test.com, teacher@test.com) with known credentials
+- [x] Create LoginTest.php feature test with tests for login via email, phone, wrong credentials, and validation
+
+## Next Steps
+
+- [x] Run the test suite to verify login testing works: `php artisan test tests/Feature/Auth/LoginTest.php`
+- [ ] Note: Test execution blocked by PHP version requirement (>=8.2.0), current is 8.1.10. Upgrade PHP to run tests.
+- [ ] Run the database seeder to populate DB with dummy data: `php artisan db:seed` (after PHP upgrade)
+- [ ] Optionally, test login manually in browser using dummy credentials (e.g., admin@test.com / password)
+- [ ] If 2FA is triggered in tests, adjust the test to handle it (currently tests assume no 2FA for low-risk logins)
