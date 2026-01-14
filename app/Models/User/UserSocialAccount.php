@@ -1,0 +1,35 @@
+<?php
+
+namespace App\Models\User;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class UserSocialAccount extends Model
+{
+    use HasFactory;
+
+    protected $fillable = [
+        'user_id',
+        'provider',
+        'provider_id',
+        'avatar',
+    ];
+
+    /**
+     * Get the user that owns the social account
+     */
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\User::class);
+    }
+
+    /**
+     * Get the provider name in title case
+     */
+    public function getProviderNameAttribute(): string
+    {
+        return ucfirst($this->provider);
+    }
+}
