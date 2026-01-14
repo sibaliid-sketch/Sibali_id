@@ -377,6 +377,365 @@ Below is the current product template data:
 | 14 | SP-ECL-SMHS-8 | SMA/Sederajat | Special Program | Program ECLAIR - C1 | Kelas Sibali | 8 | 280000 | 90000 | 1 Bulan | Kelas 11 SMA | Mahasiswa | Program pengembangan soft skills untuk SMA & mahasiswa: public speaking, kepemimpinan, & komunikasi efektif. |  |
 | 15 | SP-ECL-SMHS-8 | SMA/Sederajat | Special Program | Program ECLAIR - C2 | Kelas Sibali | 8 | 280000 | 90000 | 1 Bulan | Kelas 11 SMA | Mahasiswa | Program pengembangan soft skills untuk SMA & mahasiswa: public speaking, kepemimpinan, & komunikasi efektif. |  |
 
+## Local Testing Guide
+
+This section provides comprehensive guidance for setting up and testing the Sibali.id application locally. It includes account credentials, setup procedures, and testing scenarios for all user types and functionalities.
+
+### Environment Setup
+
+#### Prerequisites
+- PHP 8.1 or higher
+- Composer
+- Node.js and npm
+- MySQL 8.0 or higher
+- Git
+- Laragon (recommended for Windows) or similar local server stack
+
+#### Initial Setup Steps
+1. **Clone the repository**:
+   ```bash
+   git clone <repository-url>
+   cd sibali.id
+   ```
+
+2. **Install PHP dependencies**:
+   ```bash
+   composer install
+   ```
+
+3. **Install Node.js dependencies**:
+   ```bash
+   npm install
+   ```
+
+4. **Environment configuration**:
+   - Copy `.env.example` to `.env`:
+     ```bash
+     cp .env.example .env
+     ```
+   - Configure database settings in `.env`:
+     ```
+     DB_CONNECTION=mysql
+     DB_HOST=127.0.0.1
+     DB_PORT=3306
+     DB_DATABASE=sibali_local
+     DB_USERNAME=root
+     DB_PASSWORD=
+     ```
+   - Set application key:
+     ```bash
+     php artisan key:generate
+     ```
+
+5. **Database setup**:
+   - Create database: `sibali_local`
+   - Run migrations:
+     ```bash
+     php artisan migrate
+     ```
+   - Run seeders (if available):
+     ```bash
+     php artisan db:seed
+     ```
+
+6. **Build assets**:
+   ```bash
+   npm run build
+   # or for development
+   npm run dev
+   ```
+
+7. **Start the application**:
+   ```bash
+   php artisan serve
+   ```
+   Application will be available at: `http://localhost:8000`
+
+### Default Test Accounts
+
+#### Super Admin Account
+- **Email**: admin@sibali.id
+- **Password**: Sibali123!
+- **Role**: Super Administrator
+- **Access**: Full access to all admin panels, system settings, user management
+- **Purpose**: System administration, user creation, configuration management
+
+#### Department Admin Accounts
+
+##### IT Department Admin
+- **Email**: it.admin@sibali.id
+- **Password**: Sibali123!
+- **Department**: IT
+- **Access**: System monitoring, performance optimization, error tracking, database management, backup operations
+
+##### Sales & Marketing Admin
+- **Email**: marketing.admin@sibali.id
+- **Password**: Sibali123!
+- **Department**: Sales & Marketing
+- **Access**: Content management, digital marketing campaigns, newsletter management, SEO tools
+
+##### Operations Admin
+- **Email**: ops.admin@sibali.id
+- **Password**: Sibali123!
+- **Department**: Operations
+- **Access**: Order processing, invoice management, student enrollment, class scheduling, facility booking
+
+##### Finance Admin
+- **Email**: finance.admin@sibali.id
+- **Password**: Sibali123!
+- **Department**: Finance & Accounting
+- **Access**: Financial reporting, payment verification, reconciliation, budget management
+
+##### Academic Admin
+- **Email**: academic.admin@sibali.id
+- **Password**: Sibali123!
+- **Department**: Academic & Curriculum
+- **Access**: Curriculum management, course creation, teacher assignment, academic policies
+
+##### HR Admin
+- **Email**: hr.admin@sibali.id
+- **Password**: Sibali123!
+- **Department**: Human Resource
+- **Access**: Employee management, leave tracking, performance reviews, payroll coordination
+
+##### Engagement Admin
+- **Email**: engagement.admin@sibali.id
+- **Password**: Sibali123!
+- **Department**: Engagement & Retention
+- **Access**: Student retention analytics, engagement tracking, gamification management
+
+##### Public Relations Admin
+- **Email**: pr.admin@sibali.id
+- **Password**: Sibali123!
+- **Department**: Public Relation
+- **Access**: Press releases, media relations, public announcements
+
+##### Product R&D Admin
+- **Email**: rnd.admin@sibali.id
+- **Password**: Sibali123!
+- **Department**: Product Research & Development
+- **Access**: Product roadmap, feature research, beta testing coordination
+
+#### Staff Accounts (Various Levels)
+
+##### Basic Staff
+- **Email**: staff.basic@sibali.id
+- **Password**: Sibali123!
+- **Level**: Basic Staff
+- **Access**: Limited departmental access based on assigned department
+
+##### Senior Staff
+- **Email**: staff.senior@sibali.id
+- **Password**: Sibali123!
+- **Level**: Senior Staff
+- **Access**: Extended departmental access with approval capabilities
+
+##### Leader
+- **Email**: staff.leader@sibali.id
+- **Password**: Sibali123!
+- **Level**: Leader
+- **Access**: Team management, advanced departmental functions
+
+##### Supervisor
+- **Email**: staff.supervisor@sibali.id
+- **Password**: Sibali123!
+- **Level**: Supervisor
+- **Access**: Multi-team oversight, strategic planning access
+
+##### Manager
+- **Email**: staff.manager@sibali.id
+- **Password**: Sibali123!
+- **Level**: Manager
+- **Access**: Department-wide management, budgeting, strategic decisions
+
+##### Header
+- **Email**: staff.header@sibali.id
+- **Password**: Sibali123!
+- **Level**: Header
+- **Access**: Cross-departmental coordination, executive reporting
+
+##### Executives
+- **Email**: staff.executive@sibali.id
+- **Password**: Sibali123!
+- **Level**: Executives
+- **Access**: Strategic oversight, company-wide decision making
+
+#### Customer Accounts
+
+##### Parent Account (Primary)
+- **Email**: parent.test@sibali.id
+- **Password**: Sibali123!
+- **Type**: Parent (Primary account holder)
+- **Children**: Linked to student accounts
+- **Access**: CRM dashboard, billing management, child progress monitoring
+
+##### Student Account (LMS Access)
+- **Email**: student.test@sibali.id
+- **Password**: Sibali123!
+- **Type**: Student (LMS user)
+- **Age**: 15 years old
+- **Education Level**: SMA Class 2
+- **Access**: LMS platform, course materials, assignments, quizzes
+
+##### Adult Learner Account
+- **Email**: adult.learner@sibali.id
+- **Password**: Sibali123!
+- **Type**: Adult learner (>18 years)
+- **Access**: Full LMS access, flexible scheduling, advanced courses
+
+### Testing Scenarios
+
+#### Registration Testing
+1. **Customer Registration**:
+   - Visit: `http://localhost:8000/register`
+   - Test parent registration flow
+   - Test student account creation
+   - Verify email verification process
+
+2. **Staff Registration**:
+   - Staff registration is disabled for public
+   - Must be created by Operations Admin through admin panel
+   - Test invitation email flow
+
+#### Login Testing
+1. **Landing Page Login**:
+   - URL: `http://localhost:8000/login`
+   - Test all account types listed above
+   - Verify role-based redirects
+
+2. **Role-Based Access**:
+   - Admin users redirect to: `/admin/dashboard`
+   - Staff users redirect to departmental dashboards
+   - Customers redirect to appropriate CRM/LMS dashboards
+
+#### Feature Testing URLs
+
+##### Landing Page
+- **Home**: `http://localhost:8000/`
+- **About**: `http://localhost:8000/about`
+- **Programs**: `http://localhost:8000/programs`
+- **Contact**: `http://localhost:8000/contact`
+- **Order**: `http://localhost:8000/order`
+
+##### LMS (Learning Management System)
+- **Dashboard**: `http://localhost:8000/lms/dashboard`
+- **Courses**: `http://localhost:8000/lms/courses`
+- **My Classes**: `http://localhost:8000/lms/classes`
+- **Assignments**: `http://localhost:8000/lms/assignments`
+- **Grades**: `http://localhost:8000/lms/grades`
+
+##### CRM (Customer Relationship Management)
+- **Dashboard**: `http://localhost:8000/crm/dashboard`
+- **Profile**: `http://localhost:8000/crm/profile`
+- **Billing**: `http://localhost:8000/crm/billing`
+- **Support**: `http://localhost:8000/crm/support`
+
+##### Admin Panels
+- **Main Admin**: `http://localhost:8000/admin/dashboard`
+- **User Management**: `http://localhost:8000/admin/users`
+- **Content Management**: `http://localhost:8000/admin/content`
+- **Finance**: `http://localhost:8000/admin/finance`
+- **Academic**: `http://localhost:8000/admin/academic`
+- **Operations**: `http://localhost:8000/admin/operations`
+- **System Health**: `http://localhost:8000/admin/system-health`
+
+#### API Testing
+- **API Base**: `http://localhost:8000/api/`
+- **Authentication**: Use Sanctum tokens
+- **Documentation**: Available at `/api/documentation` (if configured)
+
+### Database Seeding Commands
+
+If custom seeders are available, run these commands to populate test data:
+
+```bash
+# Seed all data
+php artisan db:seed
+
+# Seed specific data types
+php artisan db:seed --class=UserSeeder
+php artisan db:seed --class=ProductSeeder
+php artisan db:seed --class=AcademicSeeder
+php artisan db:seed --class=ContentSeeder
+```
+
+### Testing Checklist
+
+#### Pre-Testing Setup
+- [ ] Environment variables configured
+- [ ] Database migrated and seeded
+- [ ] Assets compiled
+- [ ] Application running on localhost:8000
+- [ ] Mail configuration (for testing emails, use Mailtrap or similar)
+
+#### Authentication Testing
+- [ ] Admin login with all department accounts
+- [ ] Staff login with different levels
+- [ ] Customer login (parent and student)
+- [ ] Password reset functionality
+- [ ] Role-based redirects working
+- [ ] Session management
+
+#### Feature Testing
+- [ ] Landing page content display
+- [ ] LMS course access and navigation
+- [ ] CRM dashboard functionality
+- [ ] Admin panel access controls
+- [ ] Content management (CRUD operations)
+- [ ] User management (create, edit, delete)
+- [ ] Payment processing simulation
+- [ ] Email notifications
+
+#### Security Testing
+- [ ] Unauthorized access prevention
+- [ ] Role-based permissions
+- [ ] CSRF protection
+- [ ] Input validation
+- [ ] SQL injection prevention
+- [ ] XSS protection
+
+### Troubleshooting
+
+#### Common Issues
+1. **Login fails**: Check database connection and user credentials
+2. **Page not found**: Verify routes and middleware
+3. **Permission denied**: Check user roles and permissions
+4. **Assets not loading**: Run `npm run build` and clear browser cache
+5. **Database errors**: Ensure migrations are run and database is accessible
+
+#### Debug Commands
+```bash
+# Clear all caches
+php artisan cache:clear
+php artisan config:clear
+php artisan route:clear
+php artisan view:clear
+
+# Check routes
+php artisan route:list
+
+# Check database status
+php artisan migrate:status
+
+# Run tests
+php artisan test
+```
+
+#### Logs Location
+- **Laravel Logs**: `storage/logs/laravel.log`
+- **Web Server Logs**: Check Laragon logs or Apache/Nginx logs
+- **Database Logs**: MySQL error logs
+
+### Production vs Local Differences
+
+- **Database**: Local uses `sibali_local`, production uses `u486134328_sibaliid`
+- **Mail**: Local may use log driver, production uses SMTP
+- **Cache/Session**: Local uses file driver, production uses Redis
+- **Debug Mode**: Local enabled, production disabled
+- **HTTPS**: Local uses HTTP, production uses HTTPS
+
+For production deployment, ensure all configurations match the production environment settings documented in the Production Environment section above.
+
 ## Complete File List and Descriptions
 
 Below is a comprehensive list of all files and directories in the workspace, organized by directory. Each entry includes a description, purpose, function, and interconnections with other files.

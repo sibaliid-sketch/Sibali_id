@@ -16,9 +16,28 @@
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 
     @stack('styles')
+
+    <style>
+        .page-loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 3px;
+            background: linear-gradient(90deg, #8B0000, #87CEEB);
+            transform: translateX(-100%);
+            transition: transform 0.3s ease;
+            z-index: 9999;
+        }
+
+        .page-loading.active {
+            transform: translateX(0);
+        }
+    </style>
 </head>
 
 <body class="font-sans antialiased bg-gray-50">
+    <div class="page-loading" id="page-loading"></div>
     <div class="flex h-screen overflow-hidden">
         <!-- Sidebar -->
         <aside class="hidden md:flex md:flex-shrink-0">
@@ -159,6 +178,34 @@
             @yield('content')
         </div>
     </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const loadingBar = document.getElementById('page-loading');
+
+            // Show loading on link clicks
+            document.querySelectorAll('a[href]').forEach(link => {
+                link.addEventListener('click', function(e) {
+                    // Only for internal links
+                    if (this.href.startsWith(window.location.origin)) {
+                        loadingBar.classList.add('active');
+                    }
+                });
+            });
+
+            // Hide loading when page is loaded
+            window.addEventListener('load', function() {
+                loadingBar.classList.remove('active');
+            });
+
+            // Also hide on back/forward navigation
+            window.addEventListener('pageshow', function(event) {
+                if (event.persisted) {
+                    loadingBar.classList.remove('active');
+                }
+            });
+        });
+    </script>
 
     @stack('scripts')
 </body>

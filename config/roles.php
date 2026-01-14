@@ -270,11 +270,11 @@ return [
     |
     */
     'redirect_map' => [
-        'student' => '/student/dashboard',
-        'parent' => '/parent/dashboard',
-        'teacher' => '/teacher/dashboard',
-        'admin' => '/admin/dashboard',
-        'staff' => '/staff/dashboard',
+        'student' => '/lms/student/dashboard',
+        'parent' => '/lms/parent/dashboard',
+        'teacher' => '/lms/teacher/dashboard',
+        'admin' => '/lms/admin/dashboard',
+        'staff' => '/lms/staff/dashboard',
     ],
 
     /*
@@ -286,16 +286,16 @@ return [
     |
     */
     'department_redirects' => [
-        'it' => '/admin/dashboard',
-        'sales' => '/sales/dashboard',
-        'marketing' => '/marketing/dashboard',
-        'hr' => '/hr/dashboard',
-        'finance' => '/finance/dashboard',
-        'academic' => '/academic/dashboard',
-        'operations' => '/operations/dashboard',
-        'engagement' => '/engagement/dashboard',
-        'public_relation' => '/pr/dashboard',
-        'product_research' => '/product/dashboard',
+        'it' => '/lms/admin/dashboard',
+        'sales' => '/lms/sales/dashboard',
+        'marketing' => '/lms/marketing/dashboard',
+        'hr' => '/lms/hr/dashboard',
+        'finance' => '/lms/finance/dashboard',
+        'academic' => '/lms/academic/dashboard',
+        'operations' => '/lms/operations/dashboard',
+        'engagement' => '/lms/engagement/dashboard',
+        'public_relation' => '/lms/pr/dashboard',
+        'product_research' => '/lms/product/dashboard',
     ],
 
     /*
@@ -307,13 +307,13 @@ return [
     |
     */
     'staff_level_redirects' => [
-        1 => '/staff/basic/dashboard', // Basic Staff
-        2 => '/staff/senior/dashboard', // Senior Staff
-        3 => '/staff/leader/dashboard', // Leader
-        4 => '/staff/supervisor/dashboard', // Supervisor
-        5 => '/staff/manager/dashboard', // Manager
-        6 => '/staff/header/dashboard', // Header
-        7 => '/executives/dashboard', // Executives
+        1 => '/lms/staff/basic/dashboard', // Basic Staff
+        2 => '/lms/staff/senior/dashboard', // Senior Staff
+        3 => '/lms/staff/leader/dashboard', // Leader
+        4 => '/lms/staff/supervisor/dashboard', // Supervisor
+        5 => '/lms/staff/manager/dashboard', // Manager
+        6 => '/lms/staff/header/dashboard', // Header
+        7 => '/lms/executives/dashboard', // Executives
     ],
 
     /*
@@ -326,33 +326,33 @@ return [
     */
     'allowed_routes' => [
         'student' => [
-            'student.dashboard',
-            'student.profile',
-            'student.courses',
-            'student.grades',
+            'lms.student.dashboard',
+            'lms.student.profile',
+            'lms.student.courses',
+            'lms.student.grades',
             'logout',
         ],
         'parent' => [
-            'parent.dashboard',
-            'parent.children',
-            'parent.payments',
-            'parent.messages',
+            'lms.parent.dashboard',
+            'lms.parent.children',
+            'lms.parent.payments',
+            'lms.parent.messages',
             'logout',
         ],
         'teacher' => [
-            'teacher.dashboard',
-            'teacher.classes',
-            'teacher.students',
-            'teacher.grades',
+            'lms.teacher.dashboard',
+            'lms.teacher.classes',
+            'lms.teacher.students',
+            'lms.teacher.grades',
             'logout',
         ],
         'admin' => [
-            'admin.*', // All admin routes
+            'lms.admin.*', // All admin routes
         ],
         'staff' => [
-            'staff.dashboard',
-            'staff.tasks',
-            'staff.attendance',
+            'lms.staff.dashboard',
+            'lms.staff.tasks',
+            'lms.staff.attendance',
             'logout',
         ],
     ],

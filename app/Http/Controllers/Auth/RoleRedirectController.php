@@ -34,11 +34,11 @@ class RoleRedirectController extends Controller
         // Use config/roles.php mapping and staffLevel
         $roleConfig = config('roles.roles', []);
         $redirectMap = config('roles.redirect_map', [
-            'student' => route('student.dashboard'),
-            'parent' => route('parent.dashboard'),
-            'teacher' => route('teacher.dashboard'),
-            'admin' => route('admin.dashboard'),
-            'staff' => route('staff.dashboard'),
+            'student' => '/lms/student/dashboard',
+            'parent' => '/lms/parent/dashboard',
+            'teacher' => '/lms/teacher/dashboard',
+            'admin' => '/lms/admin/dashboard',
+            'staff' => '/lms/staff/dashboard',
         ]);
 
         // Default landing
@@ -69,16 +69,16 @@ class RoleRedirectController extends Controller
     protected function getDepartmentRedirect($user): ?string
     {
         $departmentRoutes = config('roles.department_redirects', [
-            'it' => route('admin.dashboard'),
-            'sales' => route('sales.dashboard'),
-            'marketing' => route('marketing.dashboard'),
-            'hr' => route('hr.dashboard'),
-            'finance' => route('finance.dashboard'),
-            'academic' => route('academic.dashboard'),
-            'operations' => route('operations.dashboard'),
-            'engagement' => route('engagement.dashboard'),
-            'public_relation' => route('pr.dashboard'),
-            'product_research' => route('product.dashboard'),
+            'it' => '/lms/admin/dashboard',
+            'sales' => '/lms/sales/dashboard',
+            'marketing' => '/lms/marketing/dashboard',
+            'hr' => '/lms/hr/dashboard',
+            'finance' => '/lms/finance/dashboard',
+            'academic' => '/lms/academic/dashboard',
+            'operations' => '/lms/operations/dashboard',
+            'engagement' => '/lms/engagement/dashboard',
+            'public_relation' => '/lms/pr/dashboard',
+            'product_research' => '/lms/product/dashboard',
         ]);
 
         return $departmentRoutes[$user->department] ?? null;
@@ -87,13 +87,13 @@ class RoleRedirectController extends Controller
     protected function getStaffLevelRedirect($user): ?string
     {
         $levelRoutes = config('roles.staff_level_redirects', [
-            1 => route('staff.basic.dashboard'), // Basic Staff
-            2 => route('staff.senior.dashboard'), // Senior Staff
-            3 => route('staff.leader.dashboard'), // Leader
-            4 => route('staff.supervisor.dashboard'), // Supervisor
-            5 => route('staff.manager.dashboard'), // Manager
-            6 => route('staff.header.dashboard'), // Header
-            7 => route('executives.dashboard'), // Executives
+            1 => '/lms/staff/basic/dashboard', // Basic Staff
+            2 => '/lms/staff/senior/dashboard', // Senior Staff
+            3 => '/lms/staff/leader/dashboard', // Leader
+            4 => '/lms/staff/supervisor/dashboard', // Supervisor
+            5 => '/lms/staff/manager/dashboard', // Manager
+            6 => '/lms/staff/header/dashboard', // Header
+            7 => '/lms/executives/dashboard', // Executives
         ]);
 
         return $levelRoutes[$user->staff_level] ?? null;

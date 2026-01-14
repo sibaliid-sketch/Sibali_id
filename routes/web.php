@@ -58,21 +58,21 @@ Route::post('/logout', [LoginController::class, 'logout'])->name('logout')->midd
 // Post-login redirect
 Route::middleware('auth')->get('/redirect', [RoleRedirectController::class, 'redirect'])->name('auth.redirect');
 
-// Dashboard Routes (Protected)
-Route::middleware(['auth'])->group(function () {
+// LMS Dashboard Routes (Protected)
+Route::middleware(['auth'])->prefix('lms')->name('lms.')->group(function () {
     // Auto redirect to appropriate dashboard
     Route::get('/dashboard', function () {
         $user = auth()->user();
         switch ($user->user_type) {
             case 'student':
-                return redirect()->route('student.dashboard');
+                return redirect()->route('lms.student.dashboard');
             case 'parent':
-                return redirect()->route('parent.dashboard');
+                return redirect()->route('lms.parent.dashboard');
             case 'teacher':
-                return redirect()->route('teacher.dashboard');
+                return redirect()->route('lms.teacher.dashboard');
             case 'admin':
             case 'staff':
-                return redirect()->route('admin.dashboard');
+                return redirect()->route('lms.admin.dashboard');
             default:
                 return redirect()->route('home');
         }
